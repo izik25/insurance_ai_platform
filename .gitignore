@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Runtime data — keep the folder structure, ignore generated content
+data/raw_documents/*
+data/processed/*
+data/json_dictionary/*
+!data/raw_documents/.gitkeep
+!data/processed/.gitkeep
+!data/json_dictionary/.gitkeep
