@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     database_url: str | None = None
 
+    tessdata_dir: Path = Path("./tessdata")
+    ocr_language: str = "heb"
+
     @property
     def raw_documents_dir(self) -> Path:
         return self.data_dir / "raw_documents"

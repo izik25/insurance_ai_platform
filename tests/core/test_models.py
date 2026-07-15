@@ -19,6 +19,7 @@ def test_minimal_required_fields() -> None:
     )
     assert doc.company == "Harel"
     assert doc.policy_number is None
+    assert doc.appendix_number == []
     assert isinstance(doc.document_id, str) and doc.document_id
     assert isinstance(doc.created_date, datetime)
 
@@ -27,7 +28,7 @@ def test_full_payload_round_trip() -> None:
     payload = {
         "company": "Harel",
         "policy_number": "123456",
-        "appendix_number": "4521",
+        "appendix_number": ["4521"],
         "appendix_name": "כיסוי אובדן כושר עבודה",
         "document_type": "appendix",
         "original_file_name": "4521.pdf",
@@ -41,6 +42,18 @@ def test_full_payload_round_trip() -> None:
     assert dumped["policy_number"] == "123456"
     assert dumped["appendix_name"] == "כיסוי אובדן כושר עבודה"
     assert dumped["ocr_confidence"] == 0.97
+
+
+def test_multiple_appendix_numbers() -> None:
+    doc = DocumentIdentity(
+        company="Migdal",
+        appendix_number=["101", "102"],
+        document_type=DocumentType.APPENDIX,
+        original_file_name="101.pdf",
+        file_path="/documents/migdal/101.pdf",
+        extraction_method=ExtractionMethod.OCR,
+    )
+    assert doc.appendix_number == ["101", "102"]
 
 
 def test_ocr_confidence_out_of_range_rejected() -> None:

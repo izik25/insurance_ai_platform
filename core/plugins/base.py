@@ -31,8 +31,13 @@ class BaseDownloader(ABC):
         self.config = config
 
     @abstractmethod
-    def download_all(self, destination_dir: Path) -> list[Path]:
-        """Download every available document, returning the local file paths."""
+    def download_all(self, destination_dir: Path, limit: int | None = None) -> list[Path]:
+        """Download available documents, returning the local file paths.
+
+        `limit`, if given, caps how many documents are downloaded — useful
+        for smoke-testing a downloader against a live site before running
+        it against the full archive.
+        """
 
 
 class BaseParser(ABC):
@@ -47,14 +52,23 @@ class BaseParser(ABC):
 
 
 class BaseExtractor(ABC):
-    """Derives identity fields (policy/appendix numbers, names) from text."""
+    """Derives identity fields (policy/appendix numbers, names) from a document.
+
+    Takes both the file path and its (possibly empty) parsed text: some
+    companies encode hints in the file path itself (e.g. Migdal's filename
+    doubles as its appendix number) that a real extractor cross-checks
+    against the page content rather than trusting blindly. When `text` is
+    empty (no embedded text layer — a scanned document), the extractor is
+    responsible for falling back to OCR itself, using `BaseRules` for
+    where to look.
+    """
 
     def __init__(self, config: CompanyConfig) -> None:
         self.config = config
 
     @abstractmethod
-    def extract_fields(self, text: str) -> dict[str, str | None]:
-        """Return whatever identity fields can be found in `text`."""
+    def extract_fields(self, file_path: Path, text: str) -> dict[str, list[str] | str | None]:
+        """Return whatever identity fields can be found for this document."""
 
 
 class BaseRules(ABC):

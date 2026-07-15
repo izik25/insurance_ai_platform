@@ -1,17 +1,22 @@
 """Migdal-specific OCR crop hints.
 
-Minimal placeholder satisfying the BaseRules contract. Real crop regions
-(where on the page the appendix number typically sits) are defined once
-Stage 3 builds the OCR pipeline and we can inspect real scanned samples.
+Validated against a real scanned document (7736_101.pdf): the appendix
+number footer sits in roughly the bottom 15% of page 1. Later pages can
+repeat it too, but page 1 alone was sufficient in testing, matching the
+platform's "don't OCR more than necessary" principle.
 """
 
 from __future__ import annotations
 
 from core.plugins.base import BaseRules
 
+_FIRST_PAGE_FOOTER = (0.0, 0.85, 1.0, 1.0)
+
 
 class MigdalRules(BaseRules):
-    """Stage 3 will replace this with real OCR crop regions."""
+    """Crop regions for Migdal's scanned policy-terms documents."""
 
     def get_ocr_crop_regions(self, page_number: int) -> list[tuple[float, float, float, float]]:
+        if page_number == 0:
+            return [_FIRST_PAGE_FOOTER]
         return []

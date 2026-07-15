@@ -1,1 +1,5 @@
-"""PDF loading and page/text access (PyMuPDF) — implemented in Stage 3."""
+"""PDF loading, text extraction, and page rendering (PyMuPDF)."""
+
+from core.pdf_processing.document import PdfDocument
+
+__all__ = ["PdfDocument"]

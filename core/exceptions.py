@@ -25,3 +25,11 @@ class CompanyNotRegisteredError(PlatformError):
 
 class DuplicateCompanyError(PlatformError):
     """Raised when a company plugin is registered more than once."""
+
+
+class PdfProcessingError(PlatformError):
+    """Raised when a PDF cannot be opened, read, or rendered to an image."""
+
+
+class OcrError(PlatformError):
+    """Raised when OCR fails to run on an image."""

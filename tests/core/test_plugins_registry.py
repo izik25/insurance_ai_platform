@@ -17,7 +17,7 @@ from core.plugins.registry import CompanyRegistry
 
 
 class _DummyDownloader(BaseDownloader):
-    def download_all(self, destination_dir: Path) -> list[Path]:
+    def download_all(self, destination_dir: Path, limit: int | None = None) -> list[Path]:
         return []
 
 
@@ -27,7 +27,7 @@ class _DummyParser(BaseParser):
 
 
 class _DummyExtractor(BaseExtractor):
-    def extract_fields(self, text: str) -> dict[str, str | None]:
+    def extract_fields(self, file_path: Path, text: str) -> dict[str, list[str] | str | None]:
         return {}
 
 

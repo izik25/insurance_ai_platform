@@ -22,7 +22,7 @@ class DocumentIdentity(BaseModel):
 
     company: str
     policy_number: str | None = None
-    appendix_number: str | None = None
+    appendix_number: list[str] = Field(default_factory=list)
     appendix_name: str | None = None
     document_type: DocumentType
 

@@ -3,3 +3,11 @@ uvicorn[standard]>=0.32,<1.0
 pydantic>=2.9,<3.0
 pydantic-settings>=2.6,<3.0
 httpx>=0.27,<1.0
+
+# PDF processing / OCR (Stage 3)
+# Note: PaddleOCR has no Hebrew recognition model, so OCR runs on Tesseract
+# instead. Requires the Tesseract binary on PATH + Hebrew tessdata
+# (run scripts/setup_tessdata.py once — not pip-installable).
+pymupdf>=1.28,<2.0
+opencv-contrib-python==4.10.0.84
+pytesseract>=0.3,<1.0
