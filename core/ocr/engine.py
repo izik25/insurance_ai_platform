@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -45,6 +46,17 @@ class TesseractEngine:
     def __init__(self, tessdata_dir: Path, lang: str = "heb") -> None:
         self.lang = lang
         os.environ["TESSDATA_PREFIX"] = str(tessdata_dir.resolve())
+
+        # Resolve the tesseract binary to an absolute path rather than
+        # relying on PATH lookup at call time: subprocess creation for
+        # unlisted executables loses PATH in some sandboxed environments,
+        # even though it's set correctly in this process's own os.environ.
+        resolved = shutil.which("tesseract")
+        if resolved is None:
+            windows_default = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            resolved = str(windows_default) if windows_default.is_file() else None
+        if resolved is not None:
+            pytesseract.pytesseract.tesseract_cmd = resolved
 
     def run(self, image: np.ndarray, *, preprocess: bool = False) -> OcrResult:
         """Run OCR on an image (typically a cropped region of a page).

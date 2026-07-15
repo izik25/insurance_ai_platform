@@ -11,3 +11,7 @@ httpx>=0.27,<1.0
 pymupdf>=1.28,<2.0
 opencv-contrib-python==4.10.0.84
 pytesseract>=0.3,<1.0
+
+# Database (Stage 4) — requires a local PostgreSQL server on PATH
+sqlalchemy>=2.0,<3.0
+psycopg2-binary>=2.9,<3.0
