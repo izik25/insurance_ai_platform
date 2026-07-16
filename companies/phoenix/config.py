@@ -38,3 +38,10 @@ class PhoenixConfig(CompanyConfig):
 
     request_timeout_seconds: float = 30.0
     download_delay_seconds: float = Field(default=0.2, ge=0.0)
+
+    # Listing (search-page) pacing is separate from download pacing: it's
+    # the browser-driven side that tripped WAF/rate-limit throttling after
+    # the initial bulk download, so it gets its own, more conservative knobs.
+    listing_page_delay_seconds: float = Field(default=3.0, ge=0.0)
+    listing_retry_base_seconds: float = Field(default=5.0, ge=0.0)
+    listing_retry_max_attempts: int = Field(default=5, ge=1)

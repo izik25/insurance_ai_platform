@@ -132,25 +132,42 @@ class PhoenixDownloader(BaseDownloader):
                 for row in rows
             )
             page_number += 1
+            if self._config.listing_page_delay_seconds:
+                time.sleep(self._config.listing_page_delay_seconds)
 
         logger.info(
             "Phoenix %s: %d documents across %d pages", domain, len(refs), page_number - 1
         )
         return refs
 
-    def _fetch_page_rows(
-        self, page: Page, url: str, max_attempts: int = 3
-    ) -> list[dict[str, str]] | None:
+    def _fetch_page_rows(self, page: Page, url: str) -> list[dict[str, str]] | None:
         """Return this page's rows, or None once genuinely past the last page.
 
         An empty row list is ambiguous on its own: the WAF occasionally
         returns a page with no results even mid-archive (observed live),
         indistinguishable from a real "no more pages" without checking for
-        the site's own no-results message. Retry a few times before
-        accepting an empty page as the real end of pagination.
+        the site's own no-results message. Retry with exponential backoff
+        before accepting an empty page as the real end of pagination —
+        the flat 1s backoff originally used here wasn't enough to recover
+        from rate-limiting after a concentrated bulk download.
         """
+        max_attempts = self._config.listing_retry_max_attempts
+        base_delay = self._config.listing_retry_base_seconds
         for attempt in range(1, max_attempts + 1):
-            response = page.goto(url, wait_until="load", timeout=30000)
+            try:
+                response = page.goto(url, wait_until="load", timeout=30000)
+            except Exception as exc:  # noqa: BLE001 - Playwright raises various timeout/nav errors
+                logger.warning(
+                    "Navigation error (attempt %d/%d): %s: %s",
+                    attempt,
+                    max_attempts,
+                    url,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    time.sleep(base_delay * attempt)
+                continue
+
             rows = page.eval_on_selector_all("tr", _ROW_EXTRACTION_JS)
             if rows:
                 return rows
@@ -163,7 +180,8 @@ class PhoenixDownloader(BaseDownloader):
                 max_attempts,
                 url,
             )
-            time.sleep(1.0)
+            if attempt < max_attempts:
+                time.sleep(base_delay * attempt)
 
         logger.warning("Giving up on %s after %d attempts", url, max_attempts)
         return None
