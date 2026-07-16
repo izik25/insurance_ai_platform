@@ -15,3 +15,8 @@ pytesseract>=0.3,<1.0
 # Database (Stage 4) — requires a local PostgreSQL server on PATH
 sqlalchemy>=2.0,<3.0
 psycopg2-binary>=2.9,<3.0
+
+# Company plugins needing a real browser to get past bot protection
+# (Phoenix sits behind AWS WAF Bot Control). Run `playwright install
+# chromium` once after installing this.
+playwright>=1.61,<2.0

@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from companies.migdal import register  # noqa: E402
+from companies.migdal.downloader import MigdalDownloader  # noqa: E402
 from core.config.settings import get_settings  # noqa: E402
 from core.database.models import Company, Document  # noqa: E402
 from core.database.session import init_db, session_scope  # noqa: E402
@@ -40,6 +41,7 @@ def main() -> None:
     registry = CompanyRegistry()
     register(registry)
     plugin = registry.get("migdal")
+    assert isinstance(plugin.downloader, MigdalDownloader)
 
     refs_by_filename = {ref.local_filename: ref for ref in plugin.downloader.list_documents()}
 
