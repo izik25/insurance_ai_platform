@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from companies.phoenix.config import PhoenixConfig
 from companies.phoenix.downloader import (
@@ -14,6 +15,11 @@ from companies.phoenix.downloader import (
     PhoenixDocumentRef,
     PhoenixDownloader,
 )
+
+
+class _FakeContext:
+    def close(self) -> None:
+        pass
 
 
 class _FakePage:
@@ -28,6 +34,7 @@ class _FakePage:
         self._pages = pages
         self.goto_calls: list[str] = []
         self._call_index = 0
+        self.context = _FakeContext()
 
     def goto(self, url: str, wait_until: str = "load", timeout: int = 30000) -> None:
         self.goto_calls.append(url)
@@ -39,12 +46,22 @@ class _FakePage:
         self._call_index += 1
         return rows
 
+    def eval_on_selector(self, selector: str, script: str) -> str | None:
+        return None  # no pager "last page" hint in these fakes
+
     def content(self) -> str:
         return _NO_RESULTS_MARKER
 
 
 def _make_config(**overrides: object) -> PhoenixConfig:
-    return PhoenixConfig(download_delay_seconds=0.0, **overrides)  # type: ignore[arg-type]
+    defaults: dict[str, object] = {
+        "download_delay_seconds": 0.0,
+        "listing_page_delay_seconds": 0.0,
+        "listing_retry_base_seconds": 0.0,
+        "download_retry_base_seconds": 0.0,
+    }
+    defaults.update(overrides)
+    return PhoenixConfig(**defaults)  # type: ignore[arg-type]
 
 
 def test_page_url_contains_expected_query_params() -> None:
@@ -71,7 +88,9 @@ def test_list_domain_paginates_until_empty_page() -> None:
     fake_page = _FakePage([page_one, page_two])
     downloader = PhoenixDownloader(_make_config())
 
-    refs = downloader._list_domain(fake_page, "health", "HealthInsCovers")
+    refs = downloader._list_domain_cover(
+        None, fake_page, "health", "HealthInsCovers", ""  # type: ignore[arg-type]
+    )
 
     assert [r.appendix_number for r in refs] == ["100", "101", "102"]
     assert all(r.domain == "health" for r in refs)
@@ -83,10 +102,71 @@ def test_list_domain_returns_empty_when_first_page_empty() -> None:
     fake_page = _FakePage([[]])
     downloader = PhoenixDownloader(_make_config())
 
-    refs = downloader._list_domain(fake_page, "life", "LifeInsCovers")
+    refs = downloader._list_domain_cover(
+        None, fake_page, "life", "LifeInsCovers", ""  # type: ignore[arg-type]
+    )
 
     assert refs == []
     assert len(fake_page.goto_calls) == 1
+
+
+def test_list_domain_dedupes_across_covers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Health queries multiple cover sub-categories and must dedupe by URL.
+
+    (Confirmed live: an unfiltered cover="" query gets stuck on an
+    unreliable page 10 for zero new documents - its results are a strict
+    subset of the sub-categories - so it's deliberately excluded. Iterating
+    sub-categories reaches every document reliably, but the same document
+    can show up under more than one cover, so results must be deduplicated
+    by download_url.)
+    """
+    calls: list[str] = []
+
+    def fake_list_domain_cover(
+        self: PhoenixDownloader,
+        browser: object,
+        page: object,
+        domain: str,
+        world: str,
+        cover: str,
+        max_pages: int | None = None,
+    ) -> list[PhoenixDocumentRef]:
+        calls.append(cover)
+        by_cover = {
+            "אמבלוטורי": [PhoenixDocumentRef("health", "נספח 100", "100", "01/26", "http://x/100.pdf")],
+            "סיעוד": [
+                PhoenixDocumentRef("health", "נספח 100", "100", "01/26", "http://x/100.pdf"),
+                PhoenixDocumentRef("health", "נספח 200", "200", "01/26", "http://x/200.pdf"),
+            ],
+        }
+        return by_cover.get(cover, [])
+
+    monkeypatch.setattr(PhoenixDownloader, "_list_domain_cover", fake_list_domain_cover)
+    monkeypatch.setattr(PhoenixDownloader, "_new_page", lambda self, browser: None)
+
+    downloader = PhoenixDownloader(_make_config())
+    refs = downloader._list_domain(None, "health", "HealthInsCovers")  # type: ignore[arg-type]
+
+    assert sorted(calls) == sorted(
+        [
+            "אמבלוטורי",
+            "גנטיקס",
+            "היתר עסקא",
+            "השתלות",
+            "כיסויים נוספים",
+            "כתבי שירות",
+            "מחלות קשות",
+            "ניתוחים",
+            "ניתוחים משולב",
+            "סיעוד",
+            "עובדים זרים",
+            "רפואה משלימה",
+            "שיניים",
+            "תאונות אישיות",
+            "תרופות",
+        ]
+    )
+    assert sorted(r.download_url for r in refs) == ["http://x/100.pdf", "http://x/200.pdf"]
 
 
 def test_local_filename_derived_from_url() -> None:
@@ -98,6 +178,30 @@ def test_local_filename_derived_from_url() -> None:
         download_url="http://www.fnx.co.il/sites/docs/polarchive/healthinsurance/nispach-100.pdf",
     )
     assert ref.local_filename == "nispach-100.pdf"
+
+
+def test_local_filename_url_decodes_percent_encoded_names() -> None:
+    ref = PhoenixDocumentRef(
+        domain="health",
+        title="נספח 100",
+        appendix_number="100",
+        edition="01/26",
+        download_url="http://x/%D7%92%D7%99%D7%9C%D7%95%D7%99%20100.pdf",
+    )
+    assert ref.local_filename == "גילוי 100.pdf"
+
+
+def test_local_filename_caps_length_for_very_long_titles() -> None:
+    long_name = "א" * 300 + ".pdf"
+    ref = PhoenixDocumentRef(
+        domain="health",
+        title="נספח ארוך",
+        appendix_number="100",
+        edition="01/26",
+        download_url=f"http://x/{long_name}",
+    )
+    assert len(ref.local_filename) <= 150
+    assert ref.local_filename.endswith(".pdf")
 
 
 def _make_downloader_with_refs(
@@ -170,3 +274,42 @@ def test_download_all_continues_after_a_failed_download(tmp_path: Path) -> None:
     assert len(saved) == 1
     assert not (tmp_path / "health" / "missing.pdf").exists()
     assert (tmp_path / "health" / "b.pdf").read_bytes() == b"CONTENT-B"
+
+
+def test_download_all_retries_transient_502_then_succeeds(tmp_path: Path) -> None:
+    refs = [PhoenixDocumentRef("health", "A", "100", "01/26", "http://x/a.pdf")]
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            return httpx.Response(502)
+        return httpx.Response(200, content=b"CONTENT-A")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    downloader = PhoenixDownloader(_make_config(), http_client=client)
+    downloader.list_documents = lambda: refs  # type: ignore[method-assign]
+
+    saved = downloader.download_all(tmp_path)
+
+    assert attempts["count"] == 3
+    assert len(saved) == 1
+    assert (tmp_path / "health" / "a.pdf").read_bytes() == b"CONTENT-A"
+
+
+def test_download_all_does_not_retry_permanent_404(tmp_path: Path) -> None:
+    refs = [PhoenixDocumentRef("health", "A", "100", "01/26", "http://x/a.pdf")]
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    downloader = PhoenixDownloader(_make_config(), http_client=client)
+    downloader.list_documents = lambda: refs  # type: ignore[method-assign]
+
+    saved = downloader.download_all(tmp_path)
+
+    assert attempts["count"] == 1
+    assert saved == []
