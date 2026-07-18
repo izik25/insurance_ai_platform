@@ -1,9 +1,9 @@
-"""Extract structured fields from every processed document via Claude.
+"""Extract structured fields from every processed document via OpenAI.
 
 For each `Document` row without a `DocumentExtraction` yet: reads the PDF's
 full text (embedded text, OCR fallback for scanned pages), submits it to
-Claude's Message Batches API for structured-field extraction, and persists
-the result. Company-agnostic - works on any document from any company, no
+OpenAI's Batch API for structured-field extraction, and persists the
+result. Company-agnostic - works on any document from any company, no
 per-company logic. Idempotent: already-extracted documents are skipped, so
 re-running only processes documents added since the last run.
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from anthropic import Anthropic  # noqa: E402
+from openai import OpenAI  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from core.config.settings import get_settings  # noqa: E402
@@ -46,8 +46,8 @@ def main() -> None:
     configure_logging(settings)
     init_db()
 
-    if not settings.anthropic_api_key:
-        raise ConfigurationError("ANTHROPIC_API_KEY is not set")
+    if not settings.openai_api_key:
+        raise ConfigurationError("OPENAI_API_KEY is not set")
 
     with session_scope() as session:
         already_extracted = set(session.scalars(select(DocumentExtraction.document_id)))
@@ -86,7 +86,7 @@ def main() -> None:
         logger.warning("No documents had extractable text - nothing to submit.")
         return
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    client = OpenAI(api_key=settings.openai_api_key)
     batch_id = submit_extraction_batch(client, settings.extraction_model, texts)
     wait_for_batch(client, batch_id)
     results = collect_extraction_results(client, batch_id)

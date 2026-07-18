@@ -21,8 +21,12 @@ psycopg2-binary>=2.9,<3.0
 # chromium` once after installing this.
 playwright>=1.61,<2.0
 
-# Structured-field extraction (Claude Batches API) and local embeddings for
-# cross-company matching. Requires ANTHROPIC_API_KEY in .env for extraction.
-anthropic>=0.68,<1.0
+# Structured-field extraction (OpenAI Batch API) and local embeddings for
+# cross-company matching. Requires OPENAI_API_KEY in .env for extraction.
+openai>=1.50,<2.0
 sentence-transformers>=3.3,<4.0
 numpy>=1.26,<3.0
+
+# Unused currently — extraction runs on OpenAI (see above), kept in case
+# Anthropic access is restored later.
+anthropic>=0.68,<1.0

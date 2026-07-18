@@ -1,11 +1,10 @@
 """Tests run without any real network access: the JSON-schema hardening
 helper is pure, and result-collection is exercised against fake objects
-shaped like the Batches API response, not a live Anthropic client."""
+shaped like OpenAI's Batch API response, not a live client."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+import json
 
 from core.extraction.llm_extract import (
     _extraction_json_schema,
@@ -32,58 +31,56 @@ def test_strict_schema_is_idempotent() -> None:
     assert schema == schema_again
 
 
-@dataclass
-class _FakeTextBlock:
-    text: str
-    type: str = "text"
+class _FakeFileContent:
+    def __init__(self, text: str) -> None:
+        self.text = text
 
 
-@dataclass
-class _FakeMessage:
-    content: list[_FakeTextBlock]
-
-
-@dataclass
-class _FakeSucceededResult:
-    message: _FakeMessage
-    type: str = "succeeded"
-
-
-@dataclass
-class _FakeErroredResult:
-    type: str = "errored"
-
-
-@dataclass
-class _FakeBatchEntry:
-    custom_id: str
-    result: Any
+class _FakeBatch:
+    def __init__(
+        self, status: str, output_file_id: str | None, error_file_id: str | None = None
+    ) -> None:
+        self.status = status
+        self.output_file_id = output_file_id
+        self.error_file_id = error_file_id
 
 
 class _FakeBatches:
-    def __init__(self, entries: list[_FakeBatchEntry]) -> None:
-        self._entries = entries
+    def __init__(self, batch: _FakeBatch) -> None:
+        self._batch = batch
 
-    def results(self, batch_id: str) -> list[_FakeBatchEntry]:
-        return self._entries
+    def retrieve(self, batch_id: str) -> _FakeBatch:
+        return self._batch
 
 
-class _FakeMessagesResource:
-    def __init__(self, entries: list[_FakeBatchEntry]) -> None:
-        self.batches = _FakeBatches(entries)
+class _FakeFiles:
+    def __init__(self, contents: dict[str, str]) -> None:
+        self._contents = contents
+
+    def content(self, file_id: str) -> _FakeFileContent:
+        return _FakeFileContent(self._contents[file_id])
 
 
 class _FakeClient:
-    def __init__(self, entries: list[_FakeBatchEntry]) -> None:
-        self.messages = _FakeMessagesResource(entries)
+    def __init__(self, batch: _FakeBatch, contents: dict[str, str]) -> None:
+        self.batches = _FakeBatches(batch)
+        self.files = _FakeFiles(contents)
+
+
+def _output_line(custom_id: str, message_content: str) -> str:
+    return json.dumps(
+        {
+            "custom_id": custom_id,
+            "response": {"body": {"choices": [{"message": {"content": message_content}}]}},
+        },
+        ensure_ascii=False,
+    )
 
 
 def test_collect_extraction_results_parses_succeeded_entries() -> None:
-    valid_json = '{"coverage_type": "ביטוח בריאות"}'
-    entries = [
-        _FakeBatchEntry("doc-1", _FakeSucceededResult(_FakeMessage([_FakeTextBlock(valid_json)]))),
-    ]
-    client = _FakeClient(entries)
+    line = _output_line("doc-1", '{"coverage_type": "ביטוח בריאות"}')
+    batch = _FakeBatch(status="completed", output_file_id="file-out")
+    client = _FakeClient(batch, {"file-out": line})
 
     results = collect_extraction_results(client, "batch-1")  # type: ignore[arg-type]
 
@@ -91,9 +88,10 @@ def test_collect_extraction_results_parses_succeeded_entries() -> None:
     assert results["doc-1"].coverage_type == "ביטוח בריאות"
 
 
-def test_collect_extraction_results_returns_none_for_errored_entries() -> None:
-    entries = [_FakeBatchEntry("doc-2", _FakeErroredResult())]
-    client = _FakeClient(entries)
+def test_collect_extraction_results_returns_none_for_errored_output_entries() -> None:
+    line = json.dumps({"custom_id": "doc-2", "error": {"message": "boom"}})
+    batch = _FakeBatch(status="completed", output_file_id="file-out")
+    client = _FakeClient(batch, {"file-out": line})
 
     results = collect_extraction_results(client, "batch-1")  # type: ignore[arg-type]
 
@@ -101,13 +99,20 @@ def test_collect_extraction_results_returns_none_for_errored_entries() -> None:
 
 
 def test_collect_extraction_results_returns_none_for_invalid_json() -> None:
-    entries = [
-        _FakeBatchEntry(
-            "doc-3", _FakeSucceededResult(_FakeMessage([_FakeTextBlock("not valid json")]))
-        ),
-    ]
-    client = _FakeClient(entries)
+    line = _output_line("doc-3", "not valid json")
+    batch = _FakeBatch(status="completed", output_file_id="file-out")
+    client = _FakeClient(batch, {"file-out": line})
 
     results = collect_extraction_results(client, "batch-1")  # type: ignore[arg-type]
 
     assert results["doc-3"] is None
+
+
+def test_collect_extraction_results_reads_error_file_for_request_level_failures() -> None:
+    error_line = json.dumps({"custom_id": "doc-4", "error": {"code": "invalid_request"}})
+    batch = _FakeBatch(status="completed", output_file_id=None, error_file_id="file-err")
+    client = _FakeClient(batch, {"file-err": error_line})
+
+    results = collect_extraction_results(client, "batch-1")  # type: ignore[arg-type]
+
+    assert results["doc-4"] is None

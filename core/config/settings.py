@@ -37,7 +37,14 @@ class Settings(BaseSettings):
     ocr_language: str = "heb"
 
     anthropic_api_key: str | None = None
-    extraction_model: str = "claude-sonnet-5"
+    openai_api_key: str | None = None
+    # OpenAI, not Anthropic: the user's Anthropic org hit an account-level
+    # identity-verification block that neither an API key nor OAuth login
+    # could get past (confirmed live, repeatedly) - OpenAI is a separate
+    # account. extraction_model stays a plain string so switching provider
+    # again later is just a config change plus swapping core/extraction/
+    # llm_extract.py's client.
+    extraction_model: str = "gpt-4.1-mini"
     embedding_model_name: str = "intfloat/multilingual-e5-large"
     similarity_auto_confirm_threshold: float = 0.95
 

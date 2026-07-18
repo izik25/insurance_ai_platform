@@ -1,21 +1,28 @@
-"""Structured-field extraction via Claude's Message Batches API.
+"""Structured-field extraction via OpenAI's Batch API.
 
 Batches (not synchronous calls) because this is one-time/periodic bulk
-processing, not a latency-sensitive path: 50% cheaper, and one call handles
-up to 100k documents. Structured Outputs (`output_config.format` with a
+processing, not a latency-sensitive path: ~50% cheaper, and one call
+handles large volumes. Structured Outputs (`response_format` with a strict
 JSON Schema) guarantees a parseable response - no ad-hoc "please return
-JSON" prompting and no tool-use round-trip needed for a single extraction
-per document.
+JSON" prompting needed.
+
+Switched from Anthropic to OpenAI: the user's Anthropic org is blocked by
+an account-level identity-verification gate that neither an API key nor
+OAuth login could get past (confirmed live, repeatedly). OpenAI is a
+separate account, so it sidesteps that specific block. The extraction
+schema/prompt/pipeline around this module (embeddings, matching, DB) is
+provider-agnostic and unaffected by this swap.
 """
 
 from __future__ import annotations
 
+import json
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic
-from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
-from anthropic.types.messages.batch_create_params import Request
+from openai import OpenAI
 from pydantic import ValidationError
 
 from core.extraction.schema import PolicyExtraction
@@ -24,6 +31,7 @@ from core.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _MAX_TOKENS = 4096
+_TERMINAL_STATUSES = {"completed", "failed", "expired", "cancelled"}
 
 _SYSTEM_PROMPT = """\
 אתה מנתח מסמכי ביטוח (נספחי פוליסה) בעברית. קיבלת את הטקסט המלא של נספח \
@@ -51,8 +59,8 @@ _SYSTEM_PROMPT = """\
 def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Recursively enforce `additionalProperties: false` + full `required`.
 
-    Pydantic's generated schema doesn't set these by default, but Claude's
-    structured-output JSON Schema mode needs them on every object (top-level
+    Pydantic's generated schema doesn't set these by default, but strict
+    JSON Schema structured-output mode needs them on every object (top-level
     and every entry under $defs) to reliably return every key.
     """
 
@@ -85,70 +93,103 @@ def _extraction_json_schema() -> dict[str, Any]:
 
 
 def submit_extraction_batch(
-    client: Anthropic, model: str, documents: dict[str, str]
+    client: OpenAI, model: str, documents: dict[str, str]
 ) -> str:
     """Submit one batch request per document; returns the batch id.
 
     `documents` maps document_id -> cleaned full text.
     """
     schema = _extraction_json_schema()
-    requests = [
-        Request(
-            custom_id=document_id,
-            params=MessageCreateParamsNonStreaming(
-                model=model,
-                max_tokens=_MAX_TOKENS,
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": text}],
-                output_config={"format": {"type": "json_schema", "schema": schema}},
-            ),
+    lines = []
+    for document_id, text in documents.items():
+        body = {
+            "model": model,
+            "max_tokens": _MAX_TOKENS,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "policy_extraction", "schema": schema, "strict": True},
+            },
+        }
+        request = {
+            "custom_id": document_id,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": body,
+        }
+        lines.append(json.dumps(request, ensure_ascii=False))
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", encoding="utf-8", delete=False
+    ) as handle:
+        handle.write("\n".join(lines))
+        batch_input_path = Path(handle.name)
+
+    try:
+        with batch_input_path.open("rb") as upload_handle:
+            uploaded = client.files.create(file=upload_handle, purpose="batch")
+        batch = client.batches.create(
+            input_file_id=uploaded.id, endpoint="/v1/chat/completions", completion_window="24h"
         )
-        for document_id, text in documents.items()
-    ]
-    batch = client.messages.batches.create(requests=requests)
-    logger.info("Submitted extraction batch %s (%d documents)", batch.id, len(requests))
+    finally:
+        batch_input_path.unlink(missing_ok=True)
+
+    logger.info("Submitted extraction batch %s (%d documents)", batch.id, len(documents))
     return batch.id
 
 
-def wait_for_batch(client: Anthropic, batch_id: str, poll_seconds: float = 30.0) -> None:
+def wait_for_batch(client: OpenAI, batch_id: str, poll_seconds: float = 30.0) -> None:
     """Block until the batch finishes (Batches API is async, not instant)."""
     while True:
-        batch = client.messages.batches.retrieve(batch_id)
-        if batch.processing_status == "ended":
-            logger.info(
-                "Batch %s ended: succeeded=%d errored=%d",
-                batch_id,
-                batch.request_counts.succeeded,
-                batch.request_counts.errored,
-            )
+        batch = client.batches.retrieve(batch_id)
+        if batch.status in _TERMINAL_STATUSES:
+            logger.info("Batch %s ended with status=%s", batch_id, batch.status)
             return
-        logger.info("Batch %s status=%s, waiting...", batch_id, batch.processing_status)
+        logger.info("Batch %s status=%s, waiting...", batch_id, batch.status)
         time.sleep(poll_seconds)
 
 
 def collect_extraction_results(
-    client: Anthropic, batch_id: str
+    client: OpenAI, batch_id: str
 ) -> dict[str, PolicyExtraction | None]:
     """Return document_id -> PolicyExtraction (None if that document failed)."""
+    batch = client.batches.retrieve(batch_id)
     results: dict[str, PolicyExtraction | None] = {}
-    for result in client.messages.batches.results(batch_id):
-        if result.result.type != "succeeded":
-            logger.warning("Extraction failed for %s: %s", result.custom_id, result.result.type)
-            results[result.custom_id] = None
-            continue
 
-        text = next(
-            (b.text for b in result.result.message.content if b.type == "text"), None
-        )
-        if text is None:
-            logger.warning("No text block in response for %s", result.custom_id)
-            results[result.custom_id] = None
-            continue
+    if batch.output_file_id:
+        content = client.files.content(batch.output_file_id).text
+        for line in content.splitlines():
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            custom_id = entry["custom_id"]
 
-        try:
-            results[result.custom_id] = PolicyExtraction.model_validate_json(text)
-        except ValidationError as exc:
-            logger.warning("Schema validation failed for %s: %s", result.custom_id, exc)
-            results[result.custom_id] = None
+            if entry.get("error"):
+                logger.warning("Extraction failed for %s: %s", custom_id, entry["error"])
+                results[custom_id] = None
+                continue
+
+            message_text = entry["response"]["body"]["choices"][0]["message"]["content"]
+            try:
+                results[custom_id] = PolicyExtraction.model_validate_json(message_text)
+            except ValidationError as exc:
+                logger.warning("Schema validation failed for %s: %s", custom_id, exc)
+                results[custom_id] = None
+
+    if batch.error_file_id:
+        error_content = client.files.content(batch.error_file_id).text
+        for line in error_content.splitlines():
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            custom_id = entry["custom_id"]
+            if custom_id not in results:
+                logger.warning(
+                    "Extraction request-level error for %s: %s", custom_id, entry.get("error")
+                )
+                results[custom_id] = None
 
     return results
