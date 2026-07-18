@@ -20,3 +20,9 @@ psycopg2-binary>=2.9,<3.0
 # (Phoenix sits behind AWS WAF Bot Control). Run `playwright install
 # chromium` once after installing this.
 playwright>=1.61,<2.0
+
+# Structured-field extraction (Claude Batches API) and local embeddings for
+# cross-company matching. Requires ANTHROPIC_API_KEY in .env for extraction.
+anthropic>=0.68,<1.0
+sentence-transformers>=3.3,<4.0
+numpy>=1.26,<3.0

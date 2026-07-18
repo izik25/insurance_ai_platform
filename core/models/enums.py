@@ -19,3 +19,12 @@ class ExtractionMethod(StrEnum):
     TEXT = "text"
     OCR = "ocr"
     MANUAL = "manual"
+
+
+class MatchStatus(StrEnum):
+    """Review state of a cross-company document match."""
+
+    AUTO_CONFIRMED = "auto_confirmed"
+    PENDING_REVIEW = "pending_review"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"

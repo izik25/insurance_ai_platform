@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     tessdata_dir: Path = Path("./tessdata")
     ocr_language: str = "heb"
 
+    anthropic_api_key: str | None = None
+    extraction_model: str = "claude-sonnet-5"
+    embedding_model_name: str = "intfloat/multilingual-e5-large"
+    similarity_auto_confirm_threshold: float = 0.95
+
     @property
     def raw_documents_dir(self) -> Path:
         return self.data_dir / "raw_documents"
