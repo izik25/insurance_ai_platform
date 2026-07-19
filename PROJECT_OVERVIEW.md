@@ -10,22 +10,26 @@
 
 ```
 insurance_ai_platform/
-├── main.py                     # FastAPI app (GET /health בלבד כרגע)
+├── main.py                     # FastAPI app: GET /health + api_router (dashboard)
 ├── pyproject.toml              # ruff + mypy + pytest config
 ├── requirements.txt / requirements-dev.txt
-├── .env / .env.example         # DATABASE_URL, DATA_DIR, LOG_*, OCR settings
+├── .env / .env.example         # DATABASE_URL, DATA_DIR, LOG_*, OCR, OPENAI_API_KEY, ...
 ├── core/
 │   ├── config/settings.py      # Settings (pydantic-settings) + get_settings()
 │   ├── database/                # models.py (SQLAlchemy 2.0), session.py
 │   ├── exceptions.py            # PlatformError + תת-מחלקות
-│   ├── extraction/              # appendix_number.py — regex לזיהוי "נספח N"
+│   ├── extraction/              # appendix_number.py, text_extraction.py, schema.py, llm_extract.py
+│   ├── embeddings/               # model.py — local multilingual-e5 wrapper
+│   ├── matching/                 # similarity.py — cross-company cosine matching
 │   ├── models/                  # document.py (DocumentIdentity), enums.py
 │   ├── ocr/                     # engine.py (Tesseract), preprocessing.py, regions.py
 │   ├── pdf_processing/          # document.py — PdfDocument (PyMuPDF wrapper)
 │   ├── plugins/                 # base.py (ABCs), registry.py (CompanyRegistry)
 │   ├── storage/                 # base.py (ABC), local.py (LocalFileStorage)
 │   ├── utils/                   # hashing.py, logging.py
-│   ├── indexing/ llm/ rag/      # placeholder ריק — שלב 6 עתידי, לא נבנה עדיין
+│   ├── indexing/ llm/ rag/      # placeholder ריק — לא בשימוש, שולבו בפועל תחת extraction/embeddings/matching
+├── api/                          # FastAPI routes for the dashboard — קריאה-בלבד, ללא LLM
+├── frontend/                     # React + Vite + TypeScript, dashboard (RTL, ללא UI framework)
 ├── companies/
 │   ├── migdal/   {__init__,config,downloader,parser,extractor,rules}.py
 │   └── phoenix/  {__init__,config,downloader,parser,extractor,rules}.py
@@ -34,7 +38,7 @@ insurance_ai_platform/
 │   ├── processed/ json_dictionary/          # ריק — שלבים עתידיים
 ├── scripts/     # CLI entry points, ראה טבלה למטה
 ├── tessdata/    # heb.traineddata, eng.traineddata (gitignored)
-└── tests/       # 22 קבצי טסט, 91 טסטים
+└── tests/       # כולל tests/core/, tests/test_api_routes.py, tests/test_main.py
 ```
 
 ## חוזה הפלאגין (`core/plugins/base.py`, `registry.py`)
@@ -58,11 +62,17 @@ insurance_ai_platform/
 
 ## סכמת ה-DB (PostgreSQL, `core/database/models.py`)
 
-רק שתי טבלאות נבנו עד כה (Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד שיהיה בהם צורך אמיתי):
+Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד שיהיה בהם צורך אמיתי. אין Alembic — הסכמה מנוהלת רק דרך `Base.metadata.create_all()` ב-`init_db()` (טבלאות חדשות נוצרות אוטומטית, לא נוגע בקיימות).
 
 **`companies`**: `id` (PK), `display_name`.
 
 **`documents`**: `id` (PK, uuid), `company_id` (FK), `original_file_name`, `file_path`, `domain` (health/life/mixed), `appendix_number` (`ARRAY(String)` — יכול להכיל כמה מספרים), `appendix_name`, `department_name`, `pages_count`, `extraction_method`, `created_date`.
+
+**`document_extractions`**: שדות מובנים שחולצו ע"י LLM לכל מסמך (1:1 עם `documents` דרך `document_id`, unique). עמודות ייעודיות להשוואה: `coverage_type`, `coverage_name`, `eligibility_conditions`, `insurance_amounts` (ARRAY), `qualifying_period` (תקופת אכשרה), `waiting_period` (תקופת המתנה), `exclusions` (ARRAY), `age_range`, `restrictions` (ARRAY), `tables` (JSONB), `disease_count`, `disease_list` (ARRAY), `survival_period`. + `raw_extraction` (JSONB, הפלט המלא כרשת ביטחון).
+
+**`document_embeddings`**: `document_id` (PK/FK), `embedding` (`ARRAY(Float)` — **לא pgvector**, לא מותקן על ה-Postgres המקומי; בסדר גודל של אלפי מסמכים, cosine similarity ב-numpy בזיכרון מהיר מספיק), `model_name`.
+
+**`document_matches`**: `id` (`f"{doc_id}:{matched_doc_id}"`, דטרמיניסטי), `document_id`, `matched_document_id`, `similarity_score`, `status` (`MatchStatus`: auto_confirmed/pending_review/confirmed/rejected).
 
 ## חברות שנבנו
 
@@ -94,14 +104,28 @@ insurance_ai_platform/
 | `build_phoenix_db.py` | אכלוס DB עבור הפניקס (ללא sync — סורק listing מחדש) |
 | `sync_phoenix.py` | **המומלץ** — listing פעם אחת, הורדה + DB יחד, עם cache |
 | `setup_tessdata.py` | הורדת heb/eng traineddata ל-Tesseract |
+| `extract_documents.py` | חילוץ שדות מובנים דרך OpenAI Batch API (`--limit N`; idempotent — מדלג על מסמכים שכבר חולצו) |
+| `embed_documents.py` | embedding מקומי (multilingual-e5) לכל מסמך עם extraction אבל בלי embedding |
+| `match_documents.py` | חישוב התאמות חוצות-חברות מתוך ה-embeddings הקיימים |
 
-## Tooling
+**אזהרה חשובה**: `extract_documents.py` **בלי** `--limit` רץ על **כל** המסמכים הממתינים (יכול להיות אלפים) וקורא את הטקסט של כולם (כולל OCR) לפני ששולח batch אחד בסוף — תהליך שיכול לקחת שעות, ואם הוא נהרג/קורס באמצע, **כל ההתקדמות אובדת** (אין checkpointing חלקי). תמיד להשתמש ב-`--limit` לבדיקות; אם רצים ריצה מלאה, לתת לזה לרוץ עד הסוף בלי להפריע.
 
-- `requirements.txt`: fastapi, uvicorn, pydantic(-settings), httpx, pymupdf, opencv-contrib-python, pytesseract, sqlalchemy, psycopg2-binary, playwright.
-- `requirements-dev.txt`: pytest, ruff, mypy.
-- ruff: line-length 100, py312, `select = ["E","F","I","UP","B"]`.
-- mypy: `disallow_untyped_defs=true`, strict-ish.
-- OCR: **Tesseract** (לא PaddleOCR — אין לו מודל עברית).
+## חילוץ שדות + embeddings + matching (`core/extraction/`, `core/embeddings/`, `core/matching/`)
+
+מטרה: לחלץ מכל מסמך שדות מובנים אחידים (לא 20 שאלות חופשיות), ואז למפות אילו נספחים אצל חברות שונות מתארים את אותו כיסוי בפועל — **גם כשמספרי הנספח שונים לגמרי** (הם ספציפיים לכל חברה). ברגע שהמיפוי קיים, השוואה בין חברות היא שליפת DB טהורה, בלי שום קריאת LLM.
+
+- **LLM**: **OpenAI** (`gpt-4.1-mini` כברירת מחדל), **לא Anthropic** — חשבון ה-Anthropic של המשתמש נתקל בחסימת "Identity verification is required to continue" ברמת הארגון, שלא נפתרה לא דרך API key ולא דרך OAuth (`ant auth login`) גם אחרי כמה ניסיונות אמיתיים. `core/extraction/llm_extract.py` בנוי סביב **Message Batches API** (זול פי 2, מתאים לעיבוד חד-פעמי/תקופתי בכמויות) + **Structured Outputs** (JSON Schema strict mode) להבטחת JSON תקין תמיד.
+- **Embeddings**: מודל מקומי חינמי (`intfloat/multilingual-e5-large` דרך `sentence-transformers`), לא API בתשלום. ה-embedding מבוסס על **השדות שחולצו**, לא על הטקסט הגולמי — כדי שניסוח שונה בין חברות לא ישבש את ההתאמה.
+- **Matching**: cosine similarity (numpy) מוגבל לאותו domain (health/life) ולחברה **שונה** בלבד; ≥95% (`similarity_auto_confirm_threshold`) → `auto_confirmed`, מתחת → `pending_review` לבדיקה ידנית ב-Dashboard.
+
+## Dashboard (`api/`, `frontend/`)
+
+קריאה-בלבד כרגע, בלי שום LLM call: מציג קבצים שהורדו, חילוצים (עם פאנל פרטים ללחיצה על מסמך), והתאמות (מאושרות אוטומטית / ממתינות לבדיקה) עם אחוז דמיון. כפתור "השוואה" קיים במסך הראשי אבל לא פותח כלום עדיין (`disabled`) — זה השלב הבא.
+
+- Backend: `api/routes.py` (FastAPI `APIRouter`, `GET /api/documents|extractions/{id}|matches`), CORS ל-`localhost:5173` ב-`main.py`.
+- Frontend: React + Vite + TypeScript תחת `frontend/`, בלי ספריית UI (במכוון, "פרונט פשוט מאוד"), RTL.
+- **מלכודת אמיתית שנתפסה בבדיקה חיה**: מזהי מסמך מכילים `/` ממשי (למשל `"phoenix:phoenix/health/x.pdf"`) — נתיב FastAPI רגיל (`{document_id}`) לא תואם את זה גם כשה-frontend מקודד עם `encodeURIComponent`. הפתרון: `{document_id:path}` בצד השרת, וקידוד per-segment (לא של כל המחרוזת) בצד הלקוח. יש טסט רגרסיה לזה.
+- הרצה מקומית: `uvicorn main:app --port 8000` + (בתיקיית `frontend/`) `npm run dev` (פורט 5173).
 
 ## החלטות עיצוב מרכזיות
 
@@ -112,6 +136,7 @@ insurance_ai_platform/
 
 ## מה הבא
 
-1. **שלב פרונט** — ממשק לצפייה/חיפוש במסמכים שכבר יש ב-DB (מגדל + הפניקס).
-2. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`), ללא שינוי ב-`core/`.
-3. **עתידי (לא נבנה עוד)**: OCR_Results / Extracted_Text / Processing_Logs / Appendices / Policies tables, JSON Knowledge Dictionary, שכבת RAG/LLM (chunking, embeddings, vector DB) — הכל נדחה עד שיהיה בהם שימוש קונקרטי.
+1. **פופאפ ההשוואה** — מאחורי כפתור "השוואה" הקיים בדשבורד (כרגע `disabled`, בלי שום פונקציונליות) — בחירת נספח/חברות/שדות להשוואה, שליפה טהורה מה-DB (בלי קריאת LLM נוספת, כי ה-matching כבר קיים).
+2. **הרצה בהיקף מלא** — כרגע רק פיילוט של 20 מסמכים רץ (20/20 extraction, 17/20 embeddings, 17 matches). נשארו כ-2937 מסמכים ממתינים. **אזהרה מתועדת**: `scripts/extract_documents.py` בלי `--limit` קורא/OCR-ר את כל המסמכים הממתינים לפני שהוא שולח batch כלשהו, ואין checkpointing חלקי — קריסה/הפסקה באמצע מאבדת הכל. יש לבדוק עם המשתמש לפני ריצה מלאה: אם להריץ ריצה ארוכה בלי הפרעה, או להוסיף checkpointing קודם.
+3. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`), ללא שינוי ב-`core/`; כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
+4. **עתידי (לא נבנה עוד)**: OCR_Results / Extracted_Text / Processing_Logs / Appendices / Policies tables, JSON Knowledge Dictionary — נדחה עד שיהיה בהם שימוש קונקרטי.
