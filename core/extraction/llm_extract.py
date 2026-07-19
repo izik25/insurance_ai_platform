@@ -30,7 +30,11 @@ from core.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_MAX_TOKENS = 4096
+# Documents with large tables (e.g. a long list of covered surgical
+# procedures) can produce a long JSON response - confirmed live, 4096
+# truncated one response mid-string. 16000 gives real headroom without
+# being unbounded.
+_MAX_TOKENS = 16000
 _TERMINAL_STATUSES = {"completed", "failed", "expired", "cancelled"}
 
 _SYSTEM_PROMPT = """\

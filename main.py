@@ -6,7 +6,9 @@ Run locally with: uvicorn main:app --reload
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from api.routes import router as api_router
 from core.config.settings import get_settings
 from core.utils.logging import configure_logging, get_logger
 
@@ -15,6 +17,17 @@ configure_logging(settings)
 logger = get_logger(__name__)
 
 app = FastAPI(title=settings.app_name)
+
+# Vite's default dev server port - the dashboard frontend runs separately
+# from this API during development.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router)
 
 
 @app.get("/health")
