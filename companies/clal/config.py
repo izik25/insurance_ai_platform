@@ -46,7 +46,15 @@ class ClalConfig(CompanyConfig):
     search_page_url: str = "https://www.clalbit.co.il/policysearch/"
     search_api_url_fragment: str = "SearchPolicies"
     media_base_url: str = "https://www.clalbit.co.il"
-    company_filter_id: str = "1"  # "כלל ביטוח" in the site's Company dropdown
+    # The site's Company dropdown has TWO distinct Clal entities with
+    # completely non-overlapping document sets under the "Family" filter -
+    # confirmed live: "כלל ביטוח" (id 1) returns 290 health documents,
+    # "כלל בריאות" (id 9, "Clal Health") returns a further 81 with zero
+    # FilePath overlap between them (things like "אחריות לחיים סרטן" -
+    # cancer/critical-illness cover). Both need to be queried per domain to
+    # get the full archive; id 9 returned 0 extra for life, but it's cheap
+    # to keep checking both per domain rather than hard-code that asymmetry.
+    company_filter_ids: list[str] = Field(default_factory=lambda: ["1", "9"])
 
     request_timeout_seconds: float = 30.0
     download_delay_seconds: float = Field(default=0.2, ge=0.0)

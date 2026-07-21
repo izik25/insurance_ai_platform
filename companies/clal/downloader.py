@@ -118,8 +118,11 @@ class ClalDownloader(BaseDownloader):
         )
 
     def list_documents(self) -> list[ClalDocumentRef]:
-        """Fetch every health/life document ref for Clal."""
+        """Fetch every health/life document ref for Clal, across both
+        Company entities (see ClalConfig.company_filter_ids - "כלל ביטוח"
+        and "כלל בריאות" have completely non-overlapping document sets)."""
         refs: list[ClalDocumentRef] = []
+        seen_urls: set[str] = set()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(user_agent=_BROWSER_USER_AGENT, locale="he-IL")
@@ -127,19 +130,25 @@ class ClalDownloader(BaseDownloader):
             page.goto(self._config.search_page_url, wait_until="networkidle", timeout=60000)
 
             for domain, family_id in DOMAIN_TO_FAMILY.items():
-                refs.extend(self._list_domain(page, domain, family_id))
-                if self._config.listing_delay_seconds:
-                    time.sleep(self._config.listing_delay_seconds)
+                for company_id in self._config.company_filter_ids:
+                    for ref in self._list_domain(page, domain, family_id, company_id):
+                        if ref.download_url not in seen_urls:
+                            seen_urls.add(ref.download_url)
+                            refs.append(ref)
+                    if self._config.listing_delay_seconds:
+                        time.sleep(self._config.listing_delay_seconds)
 
             browser.close()
 
         logger.info("Clal archive: %d health/life documents found", len(refs))
         return refs
 
-    def _list_domain(self, page, domain: str, family_id: str) -> list[ClalDocumentRef]:
+    def _list_domain(
+        self, page, domain: str, family_id: str, company_id: str
+    ) -> list[ClalDocumentRef]:
         page.select_option("#Family", family_id)
         page.wait_for_timeout(300)
-        page.select_option("#Company", self._config.company_filter_id)
+        page.select_option("#Company", company_id)
         page.wait_for_timeout(300)
 
         api_fragment = self._config.search_api_url_fragment
@@ -157,8 +166,9 @@ class ClalDownloader(BaseDownloader):
 
         refs = refs_from_search_response(domain, body, self._config.media_base_url)
         logger.info(
-            "Clal %s: %d documents (TotalResultCount=%s)",
+            "Clal %s (company=%s): %d documents (TotalResultCount=%s)",
             domain,
+            company_id,
             len(refs),
             body.get("TotalResultCount"),
         )

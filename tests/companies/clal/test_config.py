@@ -11,4 +11,4 @@ def test_default_config_values() -> None:
     config = ClalConfig()
     assert config.company_id == "clal"
     assert config.display_name == "כלל"
-    assert config.company_filter_id == "1"
+    assert config.company_filter_ids == ["1", "9"]
