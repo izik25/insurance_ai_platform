@@ -161,3 +161,127 @@ def test_list_matches_filters_by_status(two_documents: list[str]) -> None:
     matched_ids = {m["id"] for m in auto_confirmed}
     assert f"{doc_a}:{doc_b}" in matched_ids
     assert all(m["document"]["id"] != doc_a for m in pending if m["id"] == f"{doc_a}:{doc_b}")
+
+
+def test_list_matches_filters_by_document_id_on_either_side(two_documents: list[str]) -> None:
+    doc_a, doc_b = two_documents
+    with session_scope() as session:
+        session.add(
+            DocumentMatch(
+                id=f"{doc_a}:{doc_b}",
+                document_id=doc_a,
+                matched_document_id=doc_b,
+                similarity_score=0.42,
+                status="pending_review",
+            )
+        )
+
+    for probe_id in (doc_a, doc_b):
+        response = client.get("/api/matches", params={"document_id": probe_id})
+        assert response.status_code == 200
+        matched_ids = {m["id"] for m in response.json()}
+        assert f"{doc_a}:{doc_b}" in matched_ids
+
+
+def test_get_extraction_includes_current_document_appendix_metadata(
+    two_documents: list[str],
+) -> None:
+    doc_a = two_documents[0]
+    with session_scope() as session:
+        session.add(DocumentExtraction(document_id=doc_a, coverage_type="ביטוח בריאות"))
+
+    response = client.get(f"/api/extractions/{doc_a}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["appendix_number"] == ["101"]
+
+
+def test_update_match_status_confirms_a_pending_match(two_documents: list[str]) -> None:
+    doc_a, doc_b = two_documents
+    match_id = f"{doc_a}:{doc_b}"
+    with session_scope() as session:
+        session.add(
+            DocumentMatch(
+                id=match_id,
+                document_id=doc_a,
+                matched_document_id=doc_b,
+                similarity_score=0.6,
+                status="pending_review",
+            )
+        )
+
+    response = client.patch(f"/api/matches/{match_id}", json={"status": "confirmed"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
+
+    with session_scope() as session:
+        row = session.get(DocumentMatch, match_id)
+        assert row is not None
+        assert row.status == "confirmed"
+
+
+def test_update_match_status_rejects_a_match() -> None:
+    company_id = f"test_company_{uuid.uuid4().hex[:8]}"
+    doc_a_id = f"{company_id}:{company_id}/health/{uuid.uuid4().hex}.pdf"
+    doc_b_id = f"{company_id}:{company_id}/health/{uuid.uuid4().hex}.pdf"
+    match_id = f"{doc_a_id}:{doc_b_id}"
+
+    with session_scope() as session:
+        session.add(Company(id=company_id, display_name="Test Co"))
+        for doc_id in (doc_a_id, doc_b_id):
+            session.add(
+                Document(
+                    id=doc_id,
+                    company_id=company_id,
+                    original_file_name="x.pdf",
+                    file_path=f"health/{doc_id}.pdf",
+                    domain="health",
+                    extraction_method="text",
+                )
+            )
+    with session_scope() as session:
+        session.add(
+            DocumentMatch(
+                id=match_id,
+                document_id=doc_a_id,
+                matched_document_id=doc_b_id,
+                similarity_score=0.5,
+                status="auto_confirmed",
+            )
+        )
+
+    try:
+        # match_id itself contains "/" and ":" (document ids do) - must round-trip
+        # through the same {..:path} pattern used for extractions.
+        response = client.patch(f"/api/matches/{match_id}", json={"status": "rejected"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "rejected"
+    finally:
+        with session_scope() as session:
+            session.query(DocumentMatch).filter_by(id=match_id).delete()
+            for doc_id in (doc_a_id, doc_b_id):
+                session.delete(session.get(Document, doc_id))
+            session.delete(session.get(Company, company_id))
+
+
+def test_update_match_status_returns_404_for_unknown_match() -> None:
+    response = client.patch("/api/matches/does-not-exist", json={"status": "confirmed"})
+    assert response.status_code == 404
+
+
+def test_update_match_status_rejects_invalid_status_value(two_documents: list[str]) -> None:
+    doc_a, doc_b = two_documents
+    match_id = f"{doc_a}:{doc_b}"
+    with session_scope() as session:
+        session.add(
+            DocumentMatch(
+                id=match_id,
+                document_id=doc_a,
+                matched_document_id=doc_b,
+                similarity_score=0.6,
+                status="pending_review",
+            )
+        )
+
+    response = client.patch(f"/api/matches/{match_id}", json={"status": "maybe"})
+    assert response.status_code == 422

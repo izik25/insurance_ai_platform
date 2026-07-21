@@ -22,6 +22,8 @@ export interface PolicyTableOut {
 
 export interface ExtractionOut {
   document_id: string;
+  appendix_number: string[];
+  appendix_name: string | null;
   coverage_type: string | null;
   coverage_name: string | null;
   eligibility_conditions: string | null;
@@ -77,5 +79,28 @@ export async function fetchMatches(status?: string): Promise<MatchOut[]> {
   const url = status ? `${API_BASE}/matches?status=${encodeURIComponent(status)}` : `${API_BASE}/matches`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Failed to load matches: ${response.status}`);
+  return response.json();
+}
+
+export async function fetchMatchesForDocument(documentId: string): Promise<MatchOut[]> {
+  const url = `${API_BASE}/matches?document_id=${encodeURIComponent(documentId)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to load matches: ${response.status}`);
+  return response.json();
+}
+
+export async function updateMatchStatus(
+  matchId: string,
+  status: "confirmed" | "rejected"
+): Promise<MatchOut> {
+  // match_id is "{document_id}:{matched_document_id}", and document ids contain
+  // literal "/" - same {..:path} route pattern/encoding as fetchExtraction.
+  const encodedPath = matchId.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(`${API_BASE}/matches/${encodedPath}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!response.ok) throw new Error(`Failed to update match: ${response.status}`);
   return response.json();
 }

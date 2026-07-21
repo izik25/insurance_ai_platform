@@ -4,10 +4,13 @@ import {
   fetchDocuments,
   fetchExtraction,
   fetchMatches,
+  fetchMatchesForDocument,
+  updateMatchStatus,
   type DocumentOut,
   type ExtractionOut,
   type MatchOut,
 } from "./api";
+import { overallScore, scoreComparison } from "./scoring";
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
@@ -29,7 +32,17 @@ function DocumentsTable({
 }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="fixed-table documents-table">
+        <colgroup>
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "28%" }} />
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "22%" }} />
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "7%" }} />
+        </colgroup>
         <thead>
           <tr>
             <th>חברה</th>
@@ -47,13 +60,20 @@ function DocumentsTable({
             <tr
               key={d.id}
               className={d.id === selectedId ? "selected" : ""}
-              onClick={() => onSelect(d.id)}
+              onClick={() => {
+                console.log("[DEBUG] document row clicked:", d.id);
+                onSelect(d.id);
+              }}
             >
               <td>{d.company_id}</td>
               <td>{d.domain}</td>
-              <td className="mono">{d.original_file_name}</td>
+              <td className="mono truncate" title={d.original_file_name}>
+                {d.original_file_name}
+              </td>
               <td>{d.appendix_number.join(", ")}</td>
-              <td>{d.appendix_name ?? "—"}</td>
+              <td className="truncate" title={d.appendix_name ?? ""}>
+                {d.appendix_name ?? "—"}
+              </td>
               <td>{d.extraction_method}</td>
               <td>{d.has_extraction ? "✓" : "—"}</td>
               <td>{d.has_embedding ? "✓" : "—"}</td>
@@ -79,13 +99,123 @@ function ListField({ label, items }: { label: string; items: string[] }) {
   );
 }
 
+function StatusRow({
+  document,
+  matches,
+}: {
+  document: DocumentOut;
+  matches: MatchOut[];
+}) {
+  const bestMatch = matches.length
+    ? [...matches].sort((a, b) => b.similarity_score - a.similarity_score)[0]
+    : null;
+  return (
+    <div className="field-grid status-grid">
+      <div>
+        <span className="field-label">שיטת חילוץ טקסט</span>
+        <span>{document.extraction_method}</span>
+      </div>
+      <div>
+        <span className="field-label">חילוץ שדות (LLM)</span>
+        <span>{document.has_extraction ? "✓ בוצע" : "— טרם בוצע"}</span>
+      </div>
+      <div>
+        <span className="field-label">Embedding</span>
+        <span>{document.has_embedding ? "✓ בוצע" : "— טרם בוצע"}</span>
+      </div>
+      <div>
+        <span className="field-label">התאמה חוצת-חברות</span>
+        <span>
+          {bestMatch
+            ? `${(bestMatch.similarity_score * 100).toFixed(1)}% (${STATUS_LABELS[bestMatch.status] ?? bestMatch.status})`
+            : "— אין עדיין"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  auto_confirmed: "מאושר אוטומטית",
+  pending_review: "ממתין לבדיקה",
+  confirmed: "אושר ידנית",
+  rejected: "נדחה",
+};
+
+function DocumentMatchesTable({
+  documentId,
+  matches,
+  onSelect,
+}: {
+  documentId: string;
+  matches: MatchOut[];
+  onSelect: (match: MatchOut) => void;
+}) {
+  if (matches.length === 0) {
+    return <p className="muted">למסמך זה אין עדיין התאמה עם חברה אחרת.</p>;
+  }
+  return (
+    <div className="table-wrap">
+      <table className="fixed-table">
+        <colgroup>
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "28%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "28%" }} />
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "10%" }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>חברה מקבילה</th>
+            <th>שם קובץ מקביל</th>
+            <th>מספר נספח מקביל</th>
+            <th>שם נספח מקביל</th>
+            <th>אחוז דמיון</th>
+            <th>סטטוס</th>
+          </tr>
+        </thead>
+        <tbody>
+          {matches.map((m) => {
+            const other = m.document.id === documentId ? m.matched_document : m.document;
+            return (
+              <tr key={m.id} onClick={() => onSelect(m)}>
+                <td>{other.company_id}</td>
+                <td className="mono truncate" title={other.original_file_name}>
+                  {other.original_file_name}
+                </td>
+                <td>{other.appendix_number.join(", ") || "—"}</td>
+                <td className="truncate" title={other.appendix_name ?? ""}>
+                  {other.appendix_name ?? "—"}
+                </td>
+                <td className={m.similarity_score >= 0.95 ? "score-high" : "score-low"}>
+                  {(m.similarity_score * 100).toFixed(1)}%
+                </td>
+                <td>{STATUS_LABELS[m.status] ?? m.status}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ExtractionPanel({ extraction }: { extraction: ExtractionOut | null }) {
   if (!extraction) {
-    return <p className="muted">בחר מסמך עם חילוץ כדי לראות את השדות שחולצו.</p>;
+    return <p className="muted">למסמך זה עדיין אין חילוץ שדות (טרם עבר עיבוד LLM).</p>;
   }
   return (
     <div className="extraction-panel">
       <div className="field-grid">
+        <div>
+          <span className="field-label">מספר נספח</span>
+          <span>{extraction.appendix_number.join(", ") || "—"}</span>
+        </div>
+        <div>
+          <span className="field-label">שם נספח</span>
+          <span>{extraction.appendix_name ?? "—"}</span>
+        </div>
         <div>
           <span className="field-label">סוג כיסוי</span>
           <span>{extraction.coverage_type ?? "—"}</span>
@@ -151,11 +281,25 @@ function ExtractionPanel({ extraction }: { extraction: ExtractionOut | null }) {
   );
 }
 
-function MatchesTable({ matches }: { matches: MatchOut[] }) {
+function MatchesTable({
+  matches,
+  onSelect,
+}: {
+  matches: MatchOut[];
+  onSelect: (match: MatchOut) => void;
+}) {
   if (matches.length === 0) return <p className="muted">אין התאמות בקטגוריה זו.</p>;
   return (
     <div className="table-wrap">
-      <table>
+      <table className="fixed-table">
+        <colgroup>
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "33%" }} />
+          <col style={{ width: "10%" }} />
+          <col style={{ width: "33%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "7%" }} />
+        </colgroup>
         <thead>
           <tr>
             <th>חברה א׳</th>
@@ -163,28 +307,452 @@ function MatchesTable({ matches }: { matches: MatchOut[] }) {
             <th>חברה ב׳</th>
             <th>מסמך ב׳</th>
             <th>אחוז דמיון</th>
+            <th>סטטוס</th>
           </tr>
         </thead>
         <tbody>
           {matches.map((m) => (
-            <tr key={m.id}>
+            <tr key={m.id} onClick={() => onSelect(m)}>
               <td>{m.document.company_id}</td>
-              <td>
+              <td className="truncate" title={m.document.original_file_name}>
                 {m.document.original_file_name}
                 <div className="muted small">{m.document.appendix_name ?? ""}</div>
               </td>
               <td>{m.matched_document.company_id}</td>
-              <td>
+              <td className="truncate" title={m.matched_document.original_file_name}>
                 {m.matched_document.original_file_name}
                 <div className="muted small">{m.matched_document.appendix_name ?? ""}</div>
               </td>
               <td className={m.similarity_score >= 0.95 ? "score-high" : "score-low"}>
                 {(m.similarity_score * 100).toFixed(1)}%
               </td>
+              <td>{STATUS_LABELS[m.status] ?? m.status}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function DocumentDetailModal({
+  document,
+  onClose,
+  onSelectMatch,
+}: {
+  document: DocumentOut;
+  onClose: () => void;
+  onSelectMatch: (match: MatchOut) => void;
+}) {
+  const [extraction, setExtraction] = useState<ExtractionOut | null>(null);
+  const [matches, setMatches] = useState<MatchOut[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchExtraction(document.id), fetchMatchesForDocument(document.id)])
+      .then(([ext, m]) => {
+        setExtraction(ext);
+        setMatches(m);
+      })
+      .finally(() => setLoading(false));
+  }, [document.id]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>
+            {document.company_id} — {document.original_file_name}
+          </h2>
+          <button className="modal-close" onClick={onClose} aria-label="סגור">
+            ✕
+          </button>
+        </div>
+
+        {loading && <p className="muted">טוען פרטי מסמך...</p>}
+
+        {!loading && (
+          <>
+            <h3>סטטוס עיבוד</h3>
+            <StatusRow document={document} matches={matches} />
+            <h3>שדות שחולצו</h3>
+            <ExtractionPanel extraction={extraction} />
+            <h3>התאמות למסמך זה</h3>
+            <DocumentMatchesTable documentId={document.id} matches={matches} onSelect={onSelectMatch} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function documentLabel(d: DocumentOut): string {
+  const appendix = d.appendix_number.join(", ");
+  const parts = [d.original_file_name, appendix && `נספח ${appendix}`, d.appendix_name].filter(Boolean);
+  return parts.join(" — ");
+}
+
+function ComparisonPickerModal({
+  documents,
+  onClose,
+  onFoundMatch,
+}: {
+  documents: DocumentOut[];
+  onClose: () => void;
+  onFoundMatch: (match: MatchOut) => void;
+}) {
+  const companies = useMemo(
+    () => Array.from(new Set(documents.map((d) => d.company_id))).sort(),
+    [documents]
+  );
+  const [companyA, setCompanyA] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
+  const [documentAId, setDocumentAId] = useState("");
+  const [companyB, setCompanyB] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [otherMatches, setOtherMatches] = useState<MatchOut[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const documentsForA = useMemo(
+    () => (companyA ? documents.filter((d) => d.company_id === companyA) : []),
+    [documents, companyA]
+  );
+  const otherCompanies = useMemo(
+    () => companies.filter((c) => c !== companyA),
+    [companies, companyA]
+  );
+
+  const filteredDocumentsForA = useMemo(() => {
+    const term = documentSearch.trim().toLowerCase();
+    const pool = term
+      ? documentsForA.filter(
+          (d) =>
+            d.original_file_name.toLowerCase().includes(term) ||
+            d.appendix_number.some((n) => n.toLowerCase().includes(term)) ||
+            (d.appendix_name ?? "").toLowerCase().includes(term)
+        )
+      : documentsForA;
+    return pool.slice(0, 200);
+  }, [documentsForA, documentSearch]);
+
+  const canSearch = Boolean(companyA && documentAId && companyB);
+
+  const runComparison = () => {
+    if (!canSearch) return;
+    setSearching(true);
+    setNotFound(false);
+    setOtherMatches([]);
+    setError(null);
+    fetchMatchesForDocument(documentAId)
+      .then((matches) => {
+        const found = matches.find(
+          (m) =>
+            (m.document.id === documentAId && m.matched_document.company_id === companyB) ||
+            (m.matched_document.id === documentAId && m.document.company_id === companyB)
+        );
+        if (found) {
+          onFoundMatch(found);
+        } else {
+          setNotFound(true);
+          setOtherMatches(matches);
+        }
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSearching(false));
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>השוואת נספחים בין חברות</h2>
+          <button className="modal-close" onClick={onClose} aria-label="סגור">
+            ✕
+          </button>
+        </div>
+
+        <div className="picker-form">
+          <div className="picker-field">
+            <label>חברת ביטוח א׳</label>
+            <select
+              value={companyA}
+              onChange={(e) => {
+                setCompanyA(e.target.value);
+                setDocumentAId("");
+                setDocumentSearch("");
+                setCompanyB("");
+                setNotFound(false);
+              }}
+            >
+              <option value="">בחר חברה...</option>
+              {companies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {companyA && (
+            <div className="picker-field">
+              <label>נספח / מסמך ({documentsForA.length} מסמכים)</label>
+              <input
+                type="text"
+                placeholder="חפש לפי שם קובץ או מספר נספח..."
+                value={documentSearch}
+                onChange={(e) => setDocumentSearch(e.target.value)}
+              />
+              <select
+                value={documentAId}
+                onChange={(e) => {
+                  setDocumentAId(e.target.value);
+                  setNotFound(false);
+                }}
+                size={Math.min(8, Math.max(4, filteredDocumentsForA.length))}
+              >
+                <option value="">בחר נספח...</option>
+                {filteredDocumentsForA.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {documentLabel(d)}
+                  </option>
+                ))}
+              </select>
+              {filteredDocumentsForA.length === 200 && (
+                <p className="muted small">מציג 200 תוצאות ראשונות - צמצם את החיפוש אם לא מוצא.</p>
+              )}
+            </div>
+          )}
+
+          {documentAId && (
+            <div className="picker-field">
+              <label>השווה מול חברה</label>
+              <select
+                value={companyB}
+                onChange={(e) => {
+                  setCompanyB(e.target.value);
+                  setNotFound(false);
+                }}
+              >
+                <option value="">בחר חברה...</option>
+                {otherCompanies.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button className="confirm-button" disabled={!canSearch || searching} onClick={runComparison}>
+            {searching ? "בודק..." : "בדוק השוואה"}
+          </button>
+
+          {error && <p className="error">שגיאה: {error}</p>}
+
+          {notFound && (
+            <div className="picker-not-found">
+              <p className="error">
+                אין מיפוי קיים בין המסמך שנבחר לבין {companyB}. ייתכן שהמסמך הזה עדיין לא הותאם לאף
+                מסמך בחברה הזו.
+              </p>
+              {otherMatches.length > 0 && (
+                <>
+                  <p className="muted">אבל נמצאו התאמות למסמך זה מול חברות אחרות:</p>
+                  <DocumentMatchesTable
+                    documentId={documentAId}
+                    matches={otherMatches}
+                    onSelect={onFoundMatch}
+                  />
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreSummary({
+  extractionA,
+  extractionB,
+  labelA,
+  labelB,
+}: {
+  extractionA: ExtractionOut;
+  extractionB: ExtractionOut;
+  labelA: string;
+  labelB: string;
+}) {
+  const criteria = useMemo(() => scoreComparison(extractionA, extractionB), [extractionA, extractionB]);
+  const overall = useMemo(() => overallScore(criteria), [criteria]);
+
+  return (
+    <div className="score-summary">
+      <p className="muted small">
+        השוואה לפי כלל אצבע פשוט וחינמי (סכום ביטוח, תקופות המתנה/אכשרה, מספר חריגים/הגבלות
+        וכו') - לא ייעוץ מקצועי, רק כיוון מהיר.
+      </p>
+      {overall === null ? (
+        <p className="muted">אין מספיק נתונים מספריים בשני הצדדים כדי להשוות.</p>
+      ) : (
+        <>
+          <div className="score-bar">
+            <div className="score-bar-a" style={{ width: `${overall.percentA}%` }}>
+              {overall.percentA >= 15 && `${overall.percentA.toFixed(0)}%`}
+            </div>
+            <div className="score-bar-b" style={{ width: `${overall.percentB}%` }}>
+              {overall.percentB >= 15 && `${overall.percentB.toFixed(0)}%`}
+            </div>
+          </div>
+          <div className="score-bar-labels">
+            <span>
+              {labelA}: {overall.percentA.toFixed(0)}%
+            </span>
+            <span>
+              {labelB}: {overall.percentB.toFixed(0)}%
+            </span>
+          </div>
+          <table className="score-table">
+            <thead>
+              <tr>
+                <th>קריטריון</th>
+                <th>{labelA}</th>
+                <th>{labelB}</th>
+                <th>עדיף</th>
+              </tr>
+            </thead>
+            <tbody>
+              {criteria.map((c) => (
+                <tr key={c.label}>
+                  <td>{c.label}</td>
+                  <td>{c.detailA}</td>
+                  <td>{c.detailB}</td>
+                  <td className={c.winner === "tie" ? "" : "score-high"}>
+                    {c.winner === "A" ? `◄ ${labelA}` : c.winner === "B" ? `${labelB} ►` : "תיקו"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MatchReviewModal({
+  match,
+  onClose,
+  onResolved,
+}: {
+  match: MatchOut;
+  onClose: () => void;
+  onResolved: (updated: MatchOut) => void;
+}) {
+  const [extractionA, setExtractionA] = useState<ExtractionOut | null>(null);
+  const [extractionB, setExtractionB] = useState<ExtractionOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState(match.status);
+  const [saving, setSaving] = useState<"confirmed" | "rejected" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchExtraction(match.document.id), fetchExtraction(match.matched_document.id)])
+      .then(([a, b]) => {
+        setExtractionA(a);
+        setExtractionB(b);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [match.document.id, match.matched_document.id]);
+
+  const decide = (nextStatus: "confirmed" | "rejected") => {
+    setSaving(nextStatus);
+    setError(null);
+    updateMatchStatus(match.id, nextStatus)
+      .then((updated) => {
+        setStatus(updated.status);
+        onResolved(updated);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSaving(null));
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>
+            השוואת התאמה — {(match.similarity_score * 100).toFixed(1)}% דמיון (
+            {STATUS_LABELS[status] ?? status})
+          </h2>
+          <button className="modal-close" onClick={onClose} aria-label="סגור">
+            ✕
+          </button>
+        </div>
+
+        {error && <p className="error">שגיאה: {error}</p>}
+
+        <div className="modal-actions">
+          <button
+            className="confirm-button"
+            disabled={saving !== null || status === "confirmed"}
+            onClick={() => decide("confirmed")}
+          >
+            {saving === "confirmed" ? "מאשר..." : "✓ אשר התאמה"}
+          </button>
+          <button
+            className="reject-button"
+            disabled={saving !== null || status === "rejected"}
+            onClick={() => decide("rejected")}
+          >
+            {saving === "rejected" ? "דוחה..." : "✕ דחה התאמה"}
+          </button>
+        </div>
+
+        {loading && <p className="muted">טוען את שני המסמכים...</p>}
+
+        {!loading && extractionA && extractionB && (
+          <>
+            <h3>מי עדיף?</h3>
+            <ScoreSummary
+              extractionA={extractionA}
+              extractionB={extractionB}
+              labelA={match.document.company_id}
+              labelB={match.matched_document.company_id}
+            />
+          </>
+        )}
+
+        {!loading && (
+          <div className="comparison-grid">
+            <div className="comparison-side">
+              <h3>
+                {match.document.company_id} — {match.document.original_file_name}
+              </h3>
+              <p className="muted small">
+                נספח {match.document.appendix_number.join(", ") || "—"}
+                {match.document.appendix_name ? ` · ${match.document.appendix_name}` : ""}
+              </p>
+              <ExtractionPanel extraction={extractionA} />
+            </div>
+            <div className="comparison-side">
+              <h3>
+                {match.matched_document.company_id} — {match.matched_document.original_file_name}
+              </h3>
+              <p className="muted small">
+                נספח {match.matched_document.appendix_number.join(", ") || "—"}
+                {match.matched_document.appendix_name ? ` · ${match.matched_document.appendix_name}` : ""}
+              </p>
+              <ExtractionPanel extraction={extractionB} />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -194,9 +762,10 @@ function App() {
   const [autoConfirmed, setAutoConfirmed] = useState<MatchOut[]>([]);
   const [pendingReview, setPendingReview] = useState<MatchOut[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedExtraction, setSelectedExtraction] = useState<ExtractionOut | null>(null);
+  const [showComparisonPicker, setShowComparisonPicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewingMatch, setReviewingMatch] = useState<MatchOut | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -213,15 +782,19 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (!selectedId) {
-      setSelectedExtraction(null);
-      return;
-    }
-    fetchExtraction(selectedId)
-      .then(setSelectedExtraction)
-      .catch(() => setSelectedExtraction(null));
-  }, [selectedId]);
+  const refreshMatchLists = () => {
+    Promise.all([fetchMatches("auto_confirmed"), fetchMatches("pending_review")]).then(
+      ([autoM, pendingM]) => {
+        setAutoConfirmed(autoM);
+        setPendingReview(pendingM);
+      }
+    );
+  };
+
+  const selectedDocument = useMemo(
+    () => documents.find((d) => d.id === selectedId) ?? null,
+    [documents, selectedId]
+  );
 
   const stats = useMemo(() => {
     const byCompany = new Map<string, number>();
@@ -240,7 +813,7 @@ function App() {
     <div className="app" dir="rtl">
       <header className="app-header">
         <h1>לוח בקרה — פלטפורמת עיבוד מסמכי ביטוח</h1>
-        <button className="compare-button" disabled title="בקרוב">
+        <button className="compare-button" onClick={() => setShowComparisonPicker(true)}>
           השוואה
         </button>
       </header>
@@ -263,28 +836,52 @@ function App() {
 
           <section>
             <h2>מסמכים שהורדו</h2>
-            <DocumentsTable
-              documents={documents}
-              onSelect={setSelectedId}
-              selectedId={selectedId}
-            />
-          </section>
-
-          <section>
-            <h2>חילוץ שדות{selectedId ? "" : " — בחר מסמך למעלה"}</h2>
-            <ExtractionPanel extraction={selectedExtraction} />
+            <DocumentsTable documents={documents} onSelect={setSelectedId} selectedId={selectedId} />
           </section>
 
           <section>
             <h2>התאמות שאושרו אוטומטית (≥95%)</h2>
-            <MatchesTable matches={autoConfirmed} />
+            <MatchesTable matches={autoConfirmed} onSelect={setReviewingMatch} />
           </section>
 
           <section>
             <h2>ממתינות לבדיקה ידנית</h2>
-            <MatchesTable matches={pendingReview} />
+            <MatchesTable matches={pendingReview} onSelect={setReviewingMatch} />
           </section>
         </>
+      )}
+
+      {selectedDocument && !reviewingMatch && (
+        <DocumentDetailModal
+          document={selectedDocument}
+          onClose={() => setSelectedId(null)}
+          onSelectMatch={(match) => {
+            setSelectedId(null);
+            setReviewingMatch(match);
+          }}
+        />
+      )}
+
+      {reviewingMatch && (
+        <MatchReviewModal
+          match={reviewingMatch}
+          onClose={() => setReviewingMatch(null)}
+          onResolved={() => {
+            refreshMatchLists();
+            setReviewingMatch(null);
+          }}
+        />
+      )}
+
+      {showComparisonPicker && !reviewingMatch && (
+        <ComparisonPickerModal
+          documents={documents}
+          onClose={() => setShowComparisonPicker(false)}
+          onFoundMatch={(match) => {
+            setShowComparisonPicker(false);
+            setReviewingMatch(match);
+          }}
+        />
       )}
     </div>
   );

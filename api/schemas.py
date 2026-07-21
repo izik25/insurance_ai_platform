@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -29,6 +30,8 @@ class PolicyTableOut(BaseModel):
 
 class ExtractionOut(BaseModel):
     document_id: str
+    appendix_number: list[str]
+    appendix_name: str | None
     coverage_type: str | None
     coverage_name: str | None
     eligibility_conditions: str | None
@@ -61,3 +64,7 @@ class MatchOut(BaseModel):
     similarity_score: float
     status: str
     created_date: datetime
+
+
+class MatchStatusUpdate(BaseModel):
+    status: Literal["confirmed", "rejected"]
