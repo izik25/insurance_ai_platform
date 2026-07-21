@@ -5,7 +5,11 @@ exclusions, disease list, etc.), not the raw document text - see
 `PolicyExtraction.embedding_text()` - so cross-company matching isn't thrown
 off by two insurers phrasing the same coverage differently.
 
-Usage: python scripts/embed_documents.py [--limit N]
+Processes documents in chunks (`--chunk-size`, default 200) and saves each
+chunk before moving to the next, so an interruption loses at most the
+in-flight chunk. Re-run the same command to resume.
+
+Usage: python scripts/embed_documents.py [--limit N] [--chunk-size N]
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ def _to_policy_extraction(row: DocumentExtraction) -> PolicyExtraction:
 def main() -> None:
     arg_parser = argparse.ArgumentParser(description=__doc__)
     arg_parser.add_argument("--limit", type=int, default=None)
+    arg_parser.add_argument("--chunk-size", type=int, default=200)
     args = arg_parser.parse_args()
 
     settings = get_settings()
@@ -70,20 +75,39 @@ def main() -> None:
         logger.info("Nothing to embed - all extracted documents already have embeddings.")
         return
 
-    logger.info("Embedding %d documents...", len(pending))
-    document_ids = [document_id for document_id, _ in pending]
-    vectors = embed_texts([text for _, text in pending])
+    chunk_size = args.chunk_size
+    chunks = [pending[i : i + chunk_size] for i in range(0, len(pending), chunk_size)]
+    logger.info(
+        "%d documents pending, split into %d chunks of up to %d.",
+        len(pending),
+        len(chunks),
+        chunk_size,
+    )
 
     model_name = settings.embedding_model_name
-    for document_id, vector in zip(document_ids, vectors, strict=True):
-        with session_scope() as session:
-            session.merge(
-                DocumentEmbedding(
-                    document_id=document_id, embedding=vector, model_name=model_name
-                )
-            )
+    total_embedded = 0
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        logger.info("Chunk %d/%d: embedding %d documents...", chunk_index, len(chunks), len(chunk))
+        document_ids = [document_id for document_id, _ in chunk]
+        vectors = embed_texts([text for _, text in chunk])
 
-    logger.info("Done. embedded=%d", len(pending))
+        for document_id, vector in zip(document_ids, vectors, strict=True):
+            with session_scope() as session:
+                session.merge(
+                    DocumentEmbedding(
+                        document_id=document_id, embedding=vector, model_name=model_name
+                    )
+                )
+
+        total_embedded += len(chunk)
+        logger.info(
+            "Chunk %d/%d done. (running total: embedded=%d)",
+            chunk_index,
+            len(chunks),
+            total_embedded,
+        )
+
+    logger.info("Done. embedded=%d", total_embedded)
 
 
 if __name__ == "__main__":

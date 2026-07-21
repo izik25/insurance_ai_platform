@@ -35,6 +35,12 @@ class Settings(BaseSettings):
 
     tessdata_dir: Path = Path("./tessdata")
     ocr_language: str = "heb"
+    # A malformed/huge scanned page can hang the tesseract subprocess
+    # indefinitely (confirmed live: a real extraction run sat blocked for
+    # ~12 hours at ~0% CPU on one page, with no exception ever raised to
+    # trigger the existing per-document error handling). This timeout turns
+    # a hang into a catchable OcrError instead.
+    ocr_timeout_seconds: float = 120.0
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None

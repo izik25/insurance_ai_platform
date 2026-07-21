@@ -88,6 +88,32 @@ def test_collect_extraction_results_parses_succeeded_entries() -> None:
     assert results["doc-1"].coverage_type == "ביטוח בריאות"
 
 
+def test_collect_extraction_results_strips_nul_bytes() -> None:
+    """Postgres (text columns and JSONB alike) rejects NUL outright - confirmed
+    live, it crashed a real extraction run partway through a batch. A stray
+    NUL in the source PDF can get echoed back verbatim by the model."""
+    message_content = json.dumps(
+        {
+            "coverage_type": "ביטוח\x00 בריאות",
+            "exclusions": ["חריג עם \x00 באמצע"],
+            "tables": [{"title": None, "headers": ["a\x00"], "rows": [["1\x00"]]}],
+        },
+        ensure_ascii=False,
+    )
+    line = _output_line("doc-nul", message_content)
+    batch = _FakeBatch(status="completed", output_file_id="file-out")
+    client = _FakeClient(batch, {"file-out": line})
+
+    results = collect_extraction_results(client, "batch-1")  # type: ignore[arg-type]
+
+    extraction = results["doc-nul"]
+    assert extraction is not None
+    assert "\x00" not in extraction.coverage_type
+    assert "\x00" not in extraction.exclusions[0]
+    assert "\x00" not in extraction.tables[0].headers[0]
+    assert "\x00" not in extraction.tables[0].rows[0][0]
+
+
 def test_collect_extraction_results_returns_none_for_errored_output_entries() -> None:
     line = json.dumps({"custom_id": "doc-2", "error": {"message": "boom"}})
     batch = _FakeBatch(status="completed", output_file_id="file-out")

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
+from core.exceptions import OcrError
 from core.ocr.engine import OcrResult, TesseractEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,22 @@ def test_run_blank_image_yields_empty_result() -> None:
     result = engine.run(blank, preprocess=False)
     assert result.text == ""
     assert result.confidence == 0.0
+
+
+def test_run_converts_tesseract_timeout_to_ocr_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung/slow OCR subprocess must surface as a catchable error instead
+    of blocking forever - a real extraction run once sat blocked for ~12
+    hours on one page because no timeout was set and nothing was ever
+    raised. pytesseract signals a timeout with a plain RuntimeError."""
+
+    def _raise_timeout(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("Tesseract process timeout")
+
+    monkeypatch.setattr("core.ocr.engine.pytesseract.image_to_string", _raise_timeout)
+
+    engine = TesseractEngine(TESSDATA_DIR, lang="eng", timeout_seconds=0.01)
+    with pytest.raises(OcrError):
+        engine.run(_render_text_image("Appendix 101"), preprocess=False)
 
 
 def test_save_result_writes_json(tmp_path: Path) -> None:

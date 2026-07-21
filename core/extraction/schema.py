@@ -22,6 +22,8 @@ class PolicyTable(BaseModel):
 class PolicyExtraction(BaseModel):
     """Structured fields for one policy appendix, as extracted by the LLM."""
 
+    appendix_number: list[str] = Field(default_factory=list)
+    appendix_name: str | None = None
     coverage_type: str | None = None
     coverage_name: str | None = None
     eligibility_conditions: str | None = None

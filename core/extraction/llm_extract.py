@@ -42,6 +42,9 @@ _SYSTEM_PROMPT = """\
 ביטוח אחד. חלץ ממנו את השדות הבאים, בדיוק כפי שמופיעים במסמך (אל תמציא \
 מידע שלא קיים - השאר שדה ריק/null אם המידע לא מופיע):
 
+- appendix_number: מספר/י הנספח כפי שמופיעים במסמך עצמו (למשל "1693" או "302"). \
+יכול להיות יותר ממספר אחד אם המסמך מכיל כמה נספחים. חפש בעמוד הראשון/בכותרת.
+- appendix_name: שם הנספח/הפוליסה כפי שמופיע במסמך (לרוב בכותרת או בעמוד הראשון)
 - coverage_type: סוג הכיסוי (למשל: ביטוח בריאות, ביטוח חיים, מחלות קשות)
 - coverage_name: שם הכיסוי/הנספח כפי שמופיע במסמך
 - eligibility_conditions: תנאי זכאות לכיסוי
@@ -156,6 +159,25 @@ def wait_for_batch(client: OpenAI, batch_id: str, poll_seconds: float = 30.0) ->
         time.sleep(poll_seconds)
 
 
+def _strip_nul_bytes(value: Any) -> Any:
+    """Recursively drop NUL (0x00) characters from strings.
+
+    Source PDFs occasionally contain a stray NUL byte (garbled OCR / binary
+    leftover) that the model echoes back verbatim in its JSON output. Both
+    Postgres text columns and JSONB reject NUL outright ("A string literal
+    cannot contain NUL (0x00) characters") - confirmed live, it crashed a
+    real extraction run partway through. Stripping here, once, covers every
+    downstream consumer (DB insert, embedding text, dashboard display).
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_strip_nul_bytes(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _strip_nul_bytes(item) for key, item in value.items()}
+    return value
+
+
 def collect_extraction_results(
     client: OpenAI, batch_id: str
 ) -> dict[str, PolicyExtraction | None]:
@@ -178,7 +200,10 @@ def collect_extraction_results(
 
             message_text = entry["response"]["body"]["choices"][0]["message"]["content"]
             try:
-                results[custom_id] = PolicyExtraction.model_validate_json(message_text)
+                parsed = PolicyExtraction.model_validate_json(message_text)
+                results[custom_id] = PolicyExtraction.model_validate(
+                    _strip_nul_bytes(parsed.model_dump())
+                )
             except ValidationError as exc:
                 logger.warning("Schema validation failed for %s: %s", custom_id, exc)
                 results[custom_id] = None

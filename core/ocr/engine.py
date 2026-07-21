@@ -43,8 +43,9 @@ class TesseractEngine:
     Tesseract at a custom tessdata directory.
     """
 
-    def __init__(self, tessdata_dir: Path, lang: str = "heb") -> None:
+    def __init__(self, tessdata_dir: Path, lang: str = "heb", timeout_seconds: float = 120.0) -> None:
         self.lang = lang
+        self.timeout_seconds = timeout_seconds
         os.environ["TESSDATA_PREFIX"] = str(tessdata_dir.resolve())
 
         # Resolve the tesseract binary to an absolute path rather than
@@ -70,10 +71,19 @@ class TesseractEngine:
         """
         ocr_input = preprocess_for_ocr(image) if preprocess else image
         try:
-            text = pytesseract.image_to_string(ocr_input, lang=self.lang).strip()
+            text = pytesseract.image_to_string(
+                ocr_input, lang=self.lang, timeout=self.timeout_seconds
+            ).strip()
             data = pytesseract.image_to_data(
-                ocr_input, lang=self.lang, output_type=pytesseract.Output.DICT
+                ocr_input,
+                lang=self.lang,
+                output_type=pytesseract.Output.DICT,
+                timeout=self.timeout_seconds,
             )
+        except RuntimeError as exc:
+            # pytesseract raises plain RuntimeError (not TesseractError) when
+            # the subprocess is killed for exceeding `timeout`.
+            raise OcrError(f"Tesseract timed out after {self.timeout_seconds}s: {exc}") from exc
         except pytesseract.TesseractError as exc:
             raise OcrError(f"Tesseract failed: {exc}") from exc
 
