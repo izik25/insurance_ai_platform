@@ -32,9 +32,10 @@ insurance_ai_platform/
 ├── frontend/                     # React + Vite + TypeScript, dashboard (RTL, ללא UI framework)
 ├── companies/
 │   ├── migdal/   {__init__,config,downloader,parser,extractor,rules}.py
-│   └── phoenix/  {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── phoenix/  {__init__,config,downloader,parser,extractor,rules}.py
+│   └── clal/     {__init__,config,downloader,parser,extractor,rules}.py
 ├── data/
-│   ├── raw_documents/{migdal,phoenix}/...   # קבצי PDF אמיתיים
+│   ├── raw_documents/{migdal,phoenix,clal}/...   # קבצי PDF אמיתיים
 │   ├── processed/ json_dictionary/          # ריק — שלבים עתידיים
 ├── scripts/     # CLI entry points, ראה טבלה למטה
 ├── tessdata/    # heb.traineddata, eng.traineddata (gitignored)
@@ -90,6 +91,14 @@ Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד ש�
 - `scripts/sync_phoenix.py` שולף את הרשימה **פעם אחת** (השלב האיטי — כשעה) ומשתמש בה גם להורדה וגם לאכלוס ה-DB, עם cache ל-`_listing_cache.json` כדי לא לסרוק מחדש בכל הרצה.
 - **1903 מסמכים ב-DB** (871 health / 1032 life), 0 עם appendix_number ריק.
 
+### כלל (`companies/clal/`)
+- מקור: `clalbit.co.il/policysearch/` — Angular SPA שמאחורי Umbraco CMS, קורא ל-`/umbraco/api/SearchApi/SearchPolicies`. ה-API עצמו מאחורי bot-management (עוגיות בסגנון Imperva/Akamai, prefix `TS...`) — קריאה ישירה ללא session דפדפן אמיתי מחזירה 404 "No HTTP resource" גם עם פרמטרים תקינים לגמרי (אושר חי). דורש טעינת עמוד החיפוש + בחירת הדרופדאונים + לחיצה על כפתור החיפוש דרך Playwright כדי לקבל cookies תקפים; הורדות PDF עצמן (תחת `/media/`) הן `httpx` רגיל, בלי הגנה (אושר חי).
+- מספר נספח, שם וכו' מגיעים **ישירות מה-JSON של ה-API** (`AttachmentNumber`) — אין קריאת קובץ/OCR בכלל (`ClalExtractor`/`ClalRules` הם no-op בכוונה, כמו הפניקס).
+- **פשוט משמעותית מהפניקס**: ה-API מחזיר את **כל** התוצאות בקריאה אחת (`TotalResultCount` תואם בדיוק למספר השורות שחזרו, גם עבור 290 בריאות וגם 215 חיים) — אין pagination בכלל, אין את הבעיה של "עמוד 10 תקוע" שהייתה בהפניקס.
+- "מחלות קשות" אינה Family נפרדת באתר כלל — היא תת-קטגוריה בתוך "בריאות" (`Family=1520`), בדיוק כמו שכבר קורה במגדל ובהפניקס.
+- `scripts/sync_clal.py` (מבנה זהה ל-`sync_phoenix.py`): שולף רשימה פעם אחת (מהירה — כמה שניות, לא כשעה כמו הפניקס), עם cache ל-`_listing_cache.json`.
+- **449 מסמכים ב-DB** (286 health / 163 life), 29 עם appendix_number ריק (93.5% כיסוי).
+
 ## הערה חשובה: תנודתיות באתר הפניקס
 
 מספר המסמכים שנמצא בסריקות שונות של הפניקס השתנה מעט בין ריצות (972↔944 בריאות, 1015↔1135↔1075 חיים) — כנראה תוצאה של אי-יציבות בצד השרת שלהם (rate limiting / load balancer) ולא bug בקוד שלנו. ה-DB מצטבר בין ריצות (merge לפי path, לא מוחק), כך שהמצב הסופי (1903) הוא איחוד של כל מה שנמצא אי-פעם, לא רק הריצה האחרונה.
@@ -136,7 +145,9 @@ Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד ש�
 
 ## מה הבא
 
-1. **פופאפ ההשוואה** — מאחורי כפתור "השוואה" הקיים בדשבורד (כרגע `disabled`, בלי שום פונקציונליות) — בחירת נספח/חברות/שדות להשוואה, שליפה טהורה מה-DB (בלי קריאת LLM נוספת, כי ה-matching כבר קיים).
-2. **הרצה בהיקף מלא** — כרגע רק פיילוט של 20 מסמכים רץ (20/20 extraction, 17/20 embeddings, 17 matches). נשארו כ-2937 מסמכים ממתינים. **אזהרה מתועדת**: `scripts/extract_documents.py` בלי `--limit` קורא/OCR-ר את כל המסמכים הממתינים לפני שהוא שולח batch כלשהו, ואין checkpointing חלקי — קריסה/הפסקה באמצע מאבדת הכל. יש לבדוק עם המשתמש לפני ריצה מלאה: אם להריץ ריצה ארוכה בלי הפרעה, או להוסיף checkpointing קודם.
+1. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`); מגדל+הפניקס+כלל כבר בפנים, כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
+2. **בדיקת איכות ה-matching** — לעבור בדשבורד על מדגם מהתאמות (במיוחד כלל מול מגדל/הפניקס, טרי) ולוודא שהן הגיוניות, כולל שימוש בציון "מי עדיף" (כלל אצבע חינמי, ר' `frontend/src/scoring.ts`) לבדיקת סבירות.
+3. **checkpointing** — `scripts/extract_documents.py`/`embed_documents.py` רצים כעת ב-chunks (`--chunk-size`, ברירת מחדל 100/200) עם שמירה ל-DB אחרי כל chunk — קריסה/הפרעה מאבדת לכל היותר chunk אחד, לא ריצה שלמה. הרצה חוזרת של אותה פקודה ממשיכה אוטומטית מאיפה שנעצר (מסמכים שכבר חולצו/הוטמעו מדולגים).
+4. **טיימאאוט OCR** — `core/ocr/engine.py` עם `ocr_timeout_seconds` (ברירת מחדל 120) כדי שעמוד סרוק פגום לא יתקע את כל הריצה לצמיתות.
 3. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`), ללא שינוי ב-`core/`; כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
 4. **עתידי (לא נבנה עוד)**: OCR_Results / Extracted_Text / Processing_Logs / Appendices / Policies tables, JSON Knowledge Dictionary — נדחה עד שיהיה בהם שימוש קונקרטי.
