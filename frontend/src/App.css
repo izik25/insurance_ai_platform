@@ -62,6 +62,20 @@
   margin-top: 8px;
 }
 
+.checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
 .stats-row {
   display: flex;
   flex-wrap: wrap;
@@ -246,6 +260,20 @@ tbody tr.selected {
   max-width: 1300px;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
+}
+
+.modal-box-wide {
+  max-width: 1800px;
+}
+
+.multi-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.multi-comparison-grid .comparison-side {
+  min-width: 0;
 }
 
 .modal-header {

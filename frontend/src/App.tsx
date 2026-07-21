@@ -397,10 +397,12 @@ function ComparisonPickerModal({
   documents,
   onClose,
   onFoundMatch,
+  onFoundMultiple,
 }: {
   documents: DocumentOut[];
   onClose: () => void;
   onFoundMatch: (match: MatchOut) => void;
+  onFoundMultiple: (documentAId: string, matches: MatchOut[], missingCompanies: string[]) => void;
 }) {
   const companies = useMemo(
     () => Array.from(new Set(documents.map((d) => d.company_id))).sort(),
@@ -409,7 +411,7 @@ function ComparisonPickerModal({
   const [companyA, setCompanyA] = useState("");
   const [documentSearch, setDocumentSearch] = useState("");
   const [documentAId, setDocumentAId] = useState("");
-  const [companyB, setCompanyB] = useState("");
+  const [companiesB, setCompaniesB] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [otherMatches, setOtherMatches] = useState<MatchOut[]>([]);
@@ -437,7 +439,14 @@ function ComparisonPickerModal({
     return pool.slice(0, 200);
   }, [documentsForA, documentSearch]);
 
-  const canSearch = Boolean(companyA && documentAId && companyB);
+  const toggleCompanyB = (company: string) => {
+    setCompaniesB((prev) =>
+      prev.includes(company) ? prev.filter((c) => c !== company) : [...prev, company]
+    );
+    setNotFound(false);
+  };
+
+  const canSearch = Boolean(companyA && documentAId && companiesB.length > 0);
 
   const runComparison = () => {
     if (!canSearch) return;
@@ -447,17 +456,35 @@ function ComparisonPickerModal({
     setError(null);
     fetchMatchesForDocument(documentAId)
       .then((matches) => {
-        const found = matches.find(
-          (m) =>
-            (m.document.id === documentAId && m.matched_document.company_id === companyB) ||
-            (m.matched_document.id === documentAId && m.document.company_id === companyB)
-        );
-        if (found) {
-          onFoundMatch(found);
-        } else {
+        const foundByCompany = new Map<string, MatchOut>();
+        for (const company of companiesB) {
+          const found = matches.find(
+            (m) =>
+              (m.document.id === documentAId && m.matched_document.company_id === company) ||
+              (m.matched_document.id === documentAId && m.document.company_id === company)
+          );
+          if (found) foundByCompany.set(company, found);
+        }
+        const foundMatches = Array.from(foundByCompany.values());
+        const missingCompanies = companiesB.filter((c) => !foundByCompany.has(c));
+
+        if (companiesB.length === 1) {
+          if (foundMatches.length === 1) {
+            onFoundMatch(foundMatches[0]);
+          } else {
+            setNotFound(true);
+            setOtherMatches(matches);
+          }
+          return;
+        }
+
+        if (foundMatches.length === 0) {
           setNotFound(true);
           setOtherMatches(matches);
+          return;
         }
+
+        onFoundMultiple(documentAId, foundMatches, missingCompanies);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setSearching(false));
@@ -482,7 +509,7 @@ function ComparisonPickerModal({
                 setCompanyA(e.target.value);
                 setDocumentAId("");
                 setDocumentSearch("");
-                setCompanyB("");
+                setCompaniesB([]);
                 setNotFound(false);
               }}
             >
@@ -527,21 +554,19 @@ function ComparisonPickerModal({
 
           {documentAId && (
             <div className="picker-field">
-              <label>השווה מול חברה</label>
-              <select
-                value={companyB}
-                onChange={(e) => {
-                  setCompanyB(e.target.value);
-                  setNotFound(false);
-                }}
-              >
-                <option value="">בחר חברה...</option>
+              <label>השווה מול חברות (אפשר לבחור כמה)</label>
+              <div className="checkbox-list">
                 {otherCompanies.map((c) => (
-                  <option key={c} value={c}>
+                  <label key={c} className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={companiesB.includes(c)}
+                      onChange={() => toggleCompanyB(c)}
+                    />
                     {c}
-                  </option>
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
           )}
 
@@ -554,8 +579,8 @@ function ComparisonPickerModal({
           {notFound && (
             <div className="picker-not-found">
               <p className="error">
-                אין מיפוי קיים בין המסמך שנבחר לבין {companyB}. ייתכן שהמסמך הזה עדיין לא הותאם לאף
-                מסמך בחברה הזו.
+                אין מיפוי קיים בין המסמך שנבחר לבין{" "}
+                {companiesB.join(", ")}. ייתכן שהמסמך הזה עדיין לא הותאם לאף מסמך באחת מהחברות האלה.
               </p>
               {otherMatches.length > 0 && (
                 <>
@@ -757,6 +782,101 @@ function MatchReviewModal({
   );
 }
 
+function MultiComparisonModal({
+  documentAId,
+  matches,
+  missingCompanies,
+  onClose,
+}: {
+  documentAId: string;
+  matches: MatchOut[];
+  missingCompanies: string[];
+  onClose: () => void;
+}) {
+  const [extractions, setExtractions] = useState<Record<string, ExtractionOut | null>>({});
+  const [loading, setLoading] = useState(true);
+
+  // Every match has documentAId on one side - pull its summary from whichever
+  // match has it, so the primary column's header doesn't need a separate fetch.
+  const primarySummary =
+    matches[0].document.id === documentAId ? matches[0].document : matches[0].matched_document;
+  const otherSides = matches.map((m) =>
+    m.document.id === documentAId
+      ? { summary: m.matched_document, match: m }
+      : { summary: m.document, match: m }
+  );
+
+  useEffect(() => {
+    setLoading(true);
+    const ids = [documentAId, ...otherSides.map((s) => s.summary.id)];
+    Promise.all(ids.map((id) => fetchExtraction(id)))
+      .then((results) => {
+        const byId: Record<string, ExtractionOut | null> = {};
+        ids.forEach((id, i) => (byId[id] = results[i]));
+        setExtractions(byId);
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentAId, matches]);
+
+  const primaryExtraction = extractions[documentAId] ?? null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box modal-box-wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>
+            השוואת נספחים — {primarySummary.company_id}/{primarySummary.original_file_name} מול{" "}
+            {otherSides.length} חברות
+          </h2>
+          <button className="modal-close" onClick={onClose} aria-label="סגור">
+            ✕
+          </button>
+        </div>
+
+        {missingCompanies.length > 0 && (
+          <p className="muted">
+            לא נמצאה התאמה קיימת מול: {missingCompanies.join(", ")}.
+          </p>
+        )}
+
+        {loading && <p className="muted">טוען את כל המסמכים...</p>}
+
+        {!loading && (
+          <div className="multi-comparison-grid">
+            <div className="comparison-side">
+              <h3>
+                {primarySummary.company_id} — {primarySummary.original_file_name}
+              </h3>
+              <ExtractionPanel extraction={primaryExtraction} />
+            </div>
+            {otherSides.map(({ summary, match }) => (
+              <div className="comparison-side" key={summary.id}>
+                <h3>
+                  {summary.company_id} — {summary.original_file_name}
+                </h3>
+                <p className="muted small">
+                  {(match.similarity_score * 100).toFixed(1)}% דמיון (
+                  {STATUS_LABELS[match.status] ?? match.status})
+                </p>
+                {primaryExtraction && extractions[summary.id] && (
+                  <ScoreSummary
+                    extractionA={primaryExtraction}
+                    extractionB={extractions[summary.id] as ExtractionOut}
+                    labelA={primarySummary.company_id}
+                    labelB={summary.company_id}
+                  />
+                )}
+                <ExtractionPanel extraction={extractions[summary.id] ?? null} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [documents, setDocuments] = useState<DocumentOut[]>([]);
   const [autoConfirmed, setAutoConfirmed] = useState<MatchOut[]>([]);
@@ -766,6 +886,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewingMatch, setReviewingMatch] = useState<MatchOut | null>(null);
+  const [multiComparison, setMultiComparison] = useState<{
+    documentAId: string;
+    matches: MatchOut[];
+    missingCompanies: string[];
+  } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -873,7 +998,7 @@ function App() {
         />
       )}
 
-      {showComparisonPicker && !reviewingMatch && (
+      {showComparisonPicker && !reviewingMatch && !multiComparison && (
         <ComparisonPickerModal
           documents={documents}
           onClose={() => setShowComparisonPicker(false)}
@@ -881,6 +1006,19 @@ function App() {
             setShowComparisonPicker(false);
             setReviewingMatch(match);
           }}
+          onFoundMultiple={(documentAId, matches, missingCompanies) => {
+            setShowComparisonPicker(false);
+            setMultiComparison({ documentAId, matches, missingCompanies });
+          }}
+        />
+      )}
+
+      {multiComparison && (
+        <MultiComparisonModal
+          documentAId={multiComparison.documentAId}
+          matches={multiComparison.matches}
+          missingCompanies={multiComparison.missingCompanies}
+          onClose={() => setMultiComparison(null)}
         />
       )}
     </div>
