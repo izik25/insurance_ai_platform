@@ -31,12 +31,13 @@ insurance_ai_platform/
 ├── api/                          # FastAPI routes for the dashboard — קריאה-בלבד, ללא LLM
 ├── frontend/                     # React + Vite + TypeScript, dashboard (RTL, ללא UI framework)
 ├── companies/
-│   ├── migdal/   {__init__,config,downloader,parser,extractor,rules}.py
-│   ├── phoenix/  {__init__,config,downloader,parser,extractor,rules}.py
-│   ├── clal/     {__init__,config,downloader,parser,extractor,rules}.py
-│   └── menorah/  {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── migdal/          {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── phoenix/         {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── clal/            {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── menorah/         {__init__,config,downloader,parser,extractor,rules}.py
+│   └── directinsurance/ {__init__,config,downloader,parser,extractor,rules}.py
 ├── data/
-│   ├── raw_documents/{migdal,phoenix,clal,menorah}/...   # קבצי PDF אמיתיים
+│   ├── raw_documents/{migdal,phoenix,clal,menorah,directinsurance}/...   # קבצי PDF אמיתיים
 │   ├── processed/ json_dictionary/          # ריק — שלבים עתידיים
 ├── scripts/     # CLI entry points, ראה טבלה למטה
 ├── tessdata/    # heb.traineddata, eng.traineddata (gitignored)
@@ -110,6 +111,15 @@ Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד ש�
 - `scripts/sync_menorah.py`: זהה במבנה ל-`sync_clal.py`/`sync_phoenix.py`, עם cache ל-`_listing_cache.json` כדי לא לחזור על שלב ה-listing האיטי/עדין.
 - **777 מסמכים ב-DB** (503 health / 274 life), 2 עם appendix_number ריק (99.7% כיסוי אחרי backfill).
 
+### ביטוח ישיר (`companies/directinsurance/`)
+- מקור: `555.co.il/webapp/api/siteapi/form/` (חיים בשלב זה; בריאות יתווסף בהמשך, קישור נפרד). **הפשוט ביותר מבין 5 החברות — אין הגנת בוט בכלל, אין דפדפן/session בכלל**: `GET /formdata` מחזיר את כל הטקסונומיה (products, salesGroup לכל product, formTypesActive לכל salesGroup) בקריאה אחת; `POST /sendformdata` עם `{"product","saleGroup","formType":[...],"active":"false"}` (`formType` הוא מערך — כל סוגי הטופס הקיימים לקטגוריה בבקשה אחת) מחזיר את כל התוצאות; `GET /openform/{formId}` מוריד את הקובץ ישירות — כל שלושת הקריאות אושרו חי כ-`httpx` רגיל, בלי cookies/session.
+- **החלטת משתמש מפורשת**: למרות שהוראה ראשונית אמרה לא לכלול "פוליסה" בשדה סוג הטופס האחרון, בדיקה חיה הראתה ש"השאר" (טפסי שירות/תביעות) מחזיר רק טפסים אדמיניסטרטיביים (ביטול פוליסה, עדכון מוטבים) **בלי שדה קישור הורדה בכלל**, בעוד ש"פוליסה וכתבי שירות" מחזיר את מסמכי הכיסוי האמיתיים — המשתמש אישר (אחרי `AskUserQuestion`) לכלול את כל סוגי הטופס, לא לסנן.
+- `active: "false"` ("כל הטפסים") הוא superset מלא של `"true"` ("נמכרים כעת") — נשלח רק "false" לכיסוי מרבי.
+- **אין שדה מספר נספח מובנה** (בניגוד לפניקס/כלל/מנורה) — `formName` בפורמט "<שם> <קוד>/<mahadura> - מהדורה <תאריך>" (למשל "195/01"), לא בפורמט "נספח X"; `find_appendix_numbers` מופעל בכל זאת (הגנתי) אבל מחזיר [] ברוב המסמכים — 7/35 בלבד עם appendix_number לא ריק, backfill מה-LLM אמור להשלים בהמשך.
+- **תגלית אמיתית**: מסמכי כיסוי אמיתיים (`typeKey=1`) מגיעים כ-`content-type: application/pdf` עם bytes `%PDF-` תקינים. חלק מהטפסים האדמיניסטרטיביים (`typeKey=2/3`) מגיעים עם `content-type: image/tiff` **מטעה** — ה-bytes בפועל הם JPEG (`\xff\xd8\xff`) — PyMuPDF מזהה זאת נכון מעבר לסיומת ופותח כ-pseudo-PDF בן עמוד אחד, כך שה-OCR fallback הקיים מטפל בזה נכון בלי שינוי קוד. **מקרה קצה נוסף**: קובץ אחד (`3620.pdf`) הוא פורמט raster קנייני "LEAD" (LEADTOOLS) ש-PyMuPDF לא יודע לפתוח בכלל — נכשל בעדינות (log warning + skip), לא קריסה; לא הושקע מאמץ לפענח פורמט קנייני עבור טופס אדמיניסטרטיבי חסר תוכן כיסוי ממילא.
+- מסמך אחד (`formId=9049`, "בקשה לביטול פוליסה") מחזיר 500 קבוע מהשרת שלהם — אושר חי שזה לא חולף (3 ניסיונות בהפרשי זמן), כנראה רשומה שבורה בצד שלהם; לא מהותי (טופס אדמיניסטרטיבי, לא מסמך כיסוי).
+- **35 מסמכים ב-DB** (הכל life כרגע), 34 חולצו בהצלחה (1 נכשל — LEAD format), 24 עם embedding (10 טפסים אדמיניסטרטיביים חולצו עם שדות ריקים לגמרי — `embed_documents.py` מדלג נכון על טקסט ריק, כי אין להם תוכן כיסוי להשוות), 7/35 עם appendix_number לא ריק.
+
 ## הערה חשובה: תנודתיות באתר הפניקס
 
 מספר המסמכים שנמצא בסריקות שונות של הפניקס השתנה מעט בין ריצות (972↔944 בריאות, 1015↔1135↔1075 חיים) — כנראה תוצאה של אי-יציבות בצד השרת שלהם (rate limiting / load balancer) ולא bug בקוד שלנו. ה-DB מצטבר בין ריצות (merge לפי path, לא מוחק), כך שהמצב הסופי (1903) הוא איחוד של כל מה שנמצא אי-פעם, לא רק הריצה האחרונה.
@@ -156,9 +166,9 @@ Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד ש�
 
 ## מה הבא
 
-1. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`); מגדל+הפניקס+כלל כבר בפנים, כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
-2. **בדיקת איכות ה-matching** — לעבור בדשבורד על מדגם מהתאמות (במיוחד כלל מול מגדל/הפניקס, טרי) ולוודא שהן הגיוניות, כולל שימוש בציון "מי עדיף" (כלל אצבע חינמי, ר' `frontend/src/scoring.ts`) לבדיקת סבירות.
-3. **checkpointing** — `scripts/extract_documents.py`/`embed_documents.py` רצים כעת ב-chunks (`--chunk-size`, ברירת מחדל 100/200) עם שמירה ל-DB אחרי כל chunk — קריסה/הפרעה מאבדת לכל היותר chunk אחד, לא ריצה שלמה. הרצה חוזרת של אותה פקודה ממשיכה אוטומטית מאיפה שנעצר (מסמכים שכבר חולצו/הוטמעו מדולגים).
-4. **טיימאאוט OCR** — `core/ocr/engine.py` עם `ocr_timeout_seconds` (ברירת מחדל 120) כדי שעמוד סרוק פגום לא יתקע את כל הריצה לצמיתות.
-3. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`), ללא שינוי ב-`core/`; כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
-4. **עתידי (לא נבנה עוד)**: OCR_Results / Extracted_Text / Processing_Logs / Appendices / Policies tables, JSON Knowledge Dictionary — נדחה עד שיהיה בהם שימוש קונקרטי.
+1. **ביטוח ישיר — בריאות** — המשתמש שלח קישור נפרד ל"חיים" (`life_toolsactions.html`, הושלם) ואמר שישלח קישור "בריאות" בנפרד בהמשך; לא לנחש את ה-URL, לחכות שיישלח. כשיגיע: להוסיף `"health": "8"` ל-`DOMAIN_TO_PRODUCT` (`companies/directinsurance/config.py`) ולהריץ `sync_directinsurance.py --refresh-listing` — שאר הקוד כבר גנרי לכל product/domain, אין צורך בשינוי נוסף.
+2. **חברות נוספות** — מודולרי, לפי אותו pattern (`companies/<name>/`); מגדל+הפניקס+כלל+מנורה+ביטוח ישיר כבר בפנים, כל מסמך חדש עובר באותו pipeline חילוץ+embedding+matching בלי שום שינוי קוד.
+3. **בדיקת איכות ה-matching** — לעבור בדשבורד על מדגם מהתאמות ולוודא שהן הגיוניות, כולל שימוש בציון "מי עדיף" (כלל אצבע חינמי, ר' `frontend/src/scoring.ts`) לבדיקת סבירות.
+4. **checkpointing** — `scripts/extract_documents.py`/`embed_documents.py` רצים כעת ב-chunks (`--chunk-size`, ברירת מחדל 100/200) עם שמירה ל-DB אחרי כל chunk — קריסה/הפרעה מאבדת לכל היותר chunk אחד, לא ריצה שלמה. הרצה חוזרת של אותה פקודה ממשיכה אוטומטית מאיפה שנעצר (מסמכים שכבר חולצו/הוטמעו מדולגים).
+5. **טיימאאוט OCR** — `core/ocr/engine.py` עם `ocr_timeout_seconds` (ברירת מחדל 120) כדי שעמוד סרוק פגום לא יתקע את כל הריצה לצמיתות.
+6. **עתידי (לא נבנה עוד)**: OCR_Results / Extracted_Text / Processing_Logs / Appendices / Policies tables, JSON Knowledge Dictionary — נדחה עד שיהיה בהם שימוש קונקרטי.
