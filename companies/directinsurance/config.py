@@ -1,0 +1,51 @@
+"""Direct Insurance (ביטוח ישיר, 555.co.il) configuration.
+
+Unlike every other company plugin so far, this site's document-search API
+requires no browser session at all - confirmed live, plain `httpx` calls
+work end to end (see downloader.py for the full data-flow explanation).
+
+`DOMAIN_TO_PRODUCT` maps this platform's domain to 555.co.il's numeric
+`product` id, discovered live via `GET /webapp/api/siteapi/form/formdata`
+(product 7 = "ביטוח חיים"/life, product 8 = "ביטוח בריאות"/health, product
+9 = "תאונות אישיות"). Unlike Menorah's `salesGroup` sub-categories (and
+their valid form types), which are fetched dynamically from that same
+`formdata` endpoint rather than hardcoded here - the site already exposes
+that taxonomy as data, so duplicating it as a hardcoded table would only
+risk going stale.
+
+Per explicit user decision, ALL form types available for a given
+salesGroup are queried (not just "פוליסה וכתבי שירות"/policy) - live
+testing showed excluding policy returns only administrative forms with no
+download link at all, which would defeat the project's purpose of
+comparing actual policy coverage terms.
+"""
+
+from __future__ import annotations
+
+from pydantic import Field
+
+from core.plugins.base import CompanyConfig
+
+DOMAIN_TO_PRODUCT: dict[str, str] = {
+    "life": "7",
+}
+
+
+class DirectInsuranceConfig(CompanyConfig):
+    """Configuration for the Direct Insurance (ביטוח ישיר) plugin."""
+
+    company_id: str = "directinsurance"
+    display_name: str = "ביטוח ישיר"
+
+    formdata_url: str = "https://www.555.co.il/webapp/api/siteapi/form/formdata"
+    search_url: str = "https://www.555.co.il/webapp/api/siteapi/form/sendformdata"
+    download_url_template: str = "https://www.555.co.il/webapp/api/siteapi/form/openform/{form_id}"
+
+    request_timeout_seconds: float = 30.0
+    download_delay_seconds: float = Field(default=0.3, ge=0.0)
+    download_retry_max_attempts: int = Field(default=4, ge=1)
+    download_retry_base_seconds: float = Field(default=3.0, ge=0.0)
+
+    # No bot-management observed on either endpoint (confirmed live) - kept
+    # modest anyway rather than firing requests back to back.
+    listing_delay_seconds: float = Field(default=0.5, ge=0.0)
