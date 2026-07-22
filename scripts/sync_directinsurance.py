@@ -107,19 +107,32 @@ def main() -> None:
             continue
 
         relative_path = file_path.relative_to(destination.parent)
-        document = Document(
-            id=f"{plugin.config.company_id}:{relative_path.as_posix()}",
-            company_id=plugin.config.company_id,
-            original_file_name=file_path.name,
-            file_path=relative_path.as_posix(),
-            domain=file_path.parent.name,
-            appendix_number=ref.appendix_numbers,
-            appendix_name=ref.title,
-            department_name=ref.sale_group,
-            pages_count=None,
-            extraction_method="manual",
-        )
+        document_id = f"{plugin.config.company_id}:{relative_path.as_posix()}"
         with session_scope() as session:
+            # This site's own metadata almost never carries a real appendix
+            # number (see companies/directinsurance/downloader.py), so most
+            # documents only get one via the LLM extraction backfill
+            # (scripts/extract_documents.py's _backfill_appendix_metadata).
+            # A re-sync's fresh (usually empty) ref value must not clobber
+            # that already-backfilled value - same "trust the source, don't
+            # overwrite" principle, just applied against our own prior run.
+            existing = session.get(Document, document_id)
+            appendix_number = ref.appendix_numbers
+            if not appendix_number and existing is not None and existing.appendix_number:
+                appendix_number = existing.appendix_number
+
+            document = Document(
+                id=document_id,
+                company_id=plugin.config.company_id,
+                original_file_name=file_path.name,
+                file_path=relative_path.as_posix(),
+                domain=file_path.parent.name,
+                appendix_number=appendix_number,
+                appendix_name=ref.title,
+                department_name=ref.sale_group,
+                pages_count=None,
+                extraction_method="manual",
+            )
             session.merge(document)
         saved += 1
 

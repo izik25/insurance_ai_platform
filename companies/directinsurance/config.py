@@ -18,6 +18,15 @@ salesGroup are queried (not just "פוליסה וכתבי שירות"/policy) - 
 testing showed excluding policy returns only administrative forms with no
 download link at all, which would defeat the project's purpose of
 comparing actual policy coverage terms.
+
+Two salesGroups nested under the life page's product (7) - "אובדן כושר
+עבודה" (disability, key=24) and "נכות מתאונה" (accident-disability,
+key=22) - are content-wise health-adjacent rather than life/death-benefit
+products, and Migdal/Menorah already classify the same content as health.
+Kept as domain="life" here anyway per explicit user decision (2026-07):
+the cross-company matching pipeline will still surface the right pairing
+against its counterpart if relevant, so this wasn't worth the extra
+complexity of a per-salesGroup override.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from core.plugins.base import CompanyConfig
 
 DOMAIN_TO_PRODUCT: dict[str, str] = {
     "life": "7",
+    "health": "8",
 }
 
 

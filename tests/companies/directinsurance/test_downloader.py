@@ -117,7 +117,8 @@ _TAXONOMY = {
             "7": [
                 {"key": "14", "dsc": "מקרה מוות"},
                 {"key": "24", "dsc": "אובדן כושר עבודה"},
-            ]
+            ],
+            "8": [{"key": "23", "dsc": "מחלות קשות"}],
         },
         "formTypesActive": {
             "14": [
@@ -126,6 +127,7 @@ _TAXONOMY = {
                 {"key": "1", "dsc": "פוליסה וכתבי שירות"},
             ],
             "24": [{"key": "2", "dsc": "טפסי שירות"}],
+            "23": [{"key": "1", "dsc": "פוליסה וכתבי שירות"}],
         },
     },
 }
@@ -174,6 +176,24 @@ def test_list_documents_queries_every_sale_group_with_all_valid_form_types() -> 
     calls_by_group = dict(calls)
     assert set(calls_by_group["14"].split(",")) == {"1", "2", "3"}
     assert calls_by_group["24"] == "2"
+
+
+def test_list_documents_queries_health_product_too() -> None:
+    calls: list[tuple[str, str]] = []
+    search_responses = {
+        "23": {
+            "status": 0,
+            "collection": [
+                {"formId": 3, "formName": "C", "typeDsc": "פוליסה", "saleDsc": "מחלות קשות"}
+            ],
+        },
+    }
+    downloader = _make_downloader_with_taxonomy(search_responses, calls)
+
+    refs = downloader.list_documents()
+
+    refs_by_id = {ref.form_id: ref for ref in refs}
+    assert refs_by_id[3].domain == "health"
 
 
 def test_list_documents_dedupes_repeated_form_ids() -> None:

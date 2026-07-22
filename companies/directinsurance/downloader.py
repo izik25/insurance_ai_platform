@@ -50,6 +50,12 @@ Phoenix/Clal/Menorah) - `formName` values look like "<product name>
 defensively but is expected to return [] for most/all documents here;
 that's fine, per the project's "trust the source, else backfill via LLM"
 rule.
+
+Domain is taken directly from which product a salesGroup belongs to (see
+`config.DOMAIN_TO_PRODUCT`) - including the two salesGroups nested under
+the life page's product that are content-wise health-adjacent
+("אובדן כושר עבודה"/disability, "נכות מתאונה"/accident-disability); see
+config.py for why those were kept as-is rather than reclassified.
 """
 
 from __future__ import annotations
