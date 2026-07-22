@@ -33,9 +33,10 @@ insurance_ai_platform/
 ├── companies/
 │   ├── migdal/   {__init__,config,downloader,parser,extractor,rules}.py
 │   ├── phoenix/  {__init__,config,downloader,parser,extractor,rules}.py
-│   └── clal/     {__init__,config,downloader,parser,extractor,rules}.py
+│   ├── clal/     {__init__,config,downloader,parser,extractor,rules}.py
+│   └── menorah/  {__init__,config,downloader,parser,extractor,rules}.py
 ├── data/
-│   ├── raw_documents/{migdal,phoenix,clal}/...   # קבצי PDF אמיתיים
+│   ├── raw_documents/{migdal,phoenix,clal,menorah}/...   # קבצי PDF אמיתיים
 │   ├── processed/ json_dictionary/          # ריק — שלבים עתידיים
 ├── scripts/     # CLI entry points, ראה טבלה למטה
 ├── tessdata/    # heb.traineddata, eng.traineddata (gitignored)
@@ -99,6 +100,15 @@ Policies/Appendices/OCR_Results/Extracted_Text/Processing_Logs נדחו עד ש�
 - **שתי ישויות "כלל" נפרדות עם דוקומנטים שלא חופפים בכלל**: ה-Company dropdown באתר מכיל גם "כלל ביטוח" (id=1) וגם "כלל בריאות" (id=9) — אושר חי ש-id=9 מחזיר 81 מסמכי בריאות נוספים עם **אפס** חפיפה מול id=1 (כמו "אחריות לחיים סרטן" — כיסויי מחלות קשות/סרטן). `ClalConfig.company_filter_ids` שולף לכל domain את שני ה-IDs (id=9 החזיר 0 נוספים ל-חיים, אבל נבדק בכל זאת). `ClalDownloader.list_documents()` מאחד ומדדפל לפי `download_url` בין הצירופים.
 - `scripts/sync_clal.py` (מבנה זהה ל-`sync_phoenix.py`): שולף רשימה פעם אחת (מהירה — כמה שניות, לא כשעה כמו הפניקס), עם cache ל-`_listing_cache.json`.
 - **527 מסמכים ב-DB** (364 health / 163 life), 31 עם appendix_number ריק (94.1% כיסוי אחרי backfill).
+
+### מנורה מבטחים (`companies/menorah/`)
+- מקור: `menoramivt.co.il/policy/` (Next.js) — הטופס שולח POST ל-`/policy/api/v1/search/` עם גוף `{"policyHeaderForDisplay":"","policyHeaderFullMatch":false,"lineOfBusiness":<id>,"policyIssueDate":"","uuid":<int>}` ומחזיר **את כל** התוצאות בקריאה אחת (בלי pagination, כמו כלל).
+- **בניגוד למגדל/הפניקס/כלל**: "אובדן כושר עבודה", "מחלות קשות" ו"תאונות אישיות" הן קטגוריות (`lineOfBusiness`) **נפרדות** מ"בריאות" באתר הזה — אושר חי דרך רשימת ה-dropdown (`תחום`). כולן ממופות ל-domain="health" שלנו, עקבי עם איך שהפלטפורמה כבר מתייחסת לתוכן הזה בשאר החברות. גם "חיים" מפוצל ל-4 תתי-קטגוריות (ריסק בלבד / עצמאים / פרט / שכירים-מנהלים) שכולן ממופות ל-domain="life". `DOMAIN_TO_LINES_OF_BUSINESS` ב-`config.py` ממפה את שמונה ה-IDs (health: 3,5,6,13 / life: 15,16,17,18).
+- מספר נספח **לא** שדה מובנה נפרד (בניגוד לפניקס/כלל) — מוטמע כטקסט חופשי "נספח <מספר>" בתוך `policyHeader`/`tags`, ונחלץ עם אותו regex משותף ש-Migdal כבר משתמש בו על טקסט PDS גולמי (`core/extraction/appendix_number.py: find_appendix_numbers`) — לא regex ייעודי חדש.
+- **הגנת בוט אמיתית, לא רק חסימה רכה**: אחרי כמה בקשות ברצף האתר החזיר אתגר CAPTCHA אמיתי ("Anomaly Detected" + hCaptcha) — אושר חי. זה לא סוג הגנה שמנסים לעקוף; חיכינו כדקה-שתיים ובקשה בודדת עברה שוב בלי בעיה, אז זה נראה מבוסס rate/behavior ולא חסימת IP קבועה. `MenorahConfig.listing_delay_seconds=8.0` (הכי שמרני מבין 3 החברות עם דפדפן) + ניווט `page.goto` מלא לכל קטגוריה (לא ניווט יחיד עם כמה בחירות ברצף) הריצו את כל 8 הקטגוריות בהצלחה בלי לחסום שוב.
+- `MenorahDownloader.list_documents()` עושה `page.goto` טרי לכל אחת מ-8 הקטגוריות (לא session אחד עם כמה בחירות) כי הטקסט הגלוי של ה-dropdown משתנה אחרי בחירה, מה שהיה שובר את ה-locator של הבחירה הבאה. הורדות PDF (מ-`cdn.menoramivt.co.il`, host נפרד) הן `httpx` רגיל בלי הגנה (אושר חי).
+- `scripts/sync_menorah.py`: זהה במבנה ל-`sync_clal.py`/`sync_phoenix.py`, עם cache ל-`_listing_cache.json` כדי לא לחזור על שלב ה-listing האיטי/עדין.
+- **777 מסמכים ב-DB** (503 health / 274 life), 2 עם appendix_number ריק (99.7% כיסוי אחרי backfill).
 
 ## הערה חשובה: תנודתיות באתר הפניקס
 
