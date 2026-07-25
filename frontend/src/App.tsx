@@ -5,6 +5,7 @@ import {
   fetchExtraction,
   fetchMatches,
   fetchMatchesForDocument,
+  getDocumentFileUrl,
   updateMatchStatus,
   type DocumentOut,
   type ExtractionOut,
@@ -368,6 +369,23 @@ function DocumentDetailModal({
           <button className="modal-close" onClick={onClose} aria-label="סגור">
             ✕
           </button>
+        </div>
+
+        <div className="source-file-actions">
+          <a
+            className="source-file-link"
+            href={getDocumentFileUrl(document.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            📄 צפייה בקובץ המקור
+          </a>
+          <a
+            className="source-file-link source-file-link-secondary"
+            href={getDocumentFileUrl(document.id, { download: true })}
+          >
+            ⬇ הורדת קובץ המקור
+          </a>
         </div>
 
         {loading && <p className="muted">טוען פרטי מסמך...</p>}

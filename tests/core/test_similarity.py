@@ -81,3 +81,94 @@ def test_picks_best_match_among_multiple_candidates() -> None:
     matches = find_cross_company_matches(embeddings, meta)
     by_doc = {m.document_id: m for m in matches}
     assert by_doc["migdal:a"].matched_document_id == "phoenix:close"
+
+
+def test_auto_confirmed_when_appendix_names_share_a_word() -> None:
+    embeddings = {
+        "migdal:a": [1.0, 0.0],
+        "phoenix:a": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:a": DocumentMeta(
+            company_id="migdal", domain="health", appendix_name="ניתוחים וטיפולים בישראל"
+        ),
+        "phoenix:a": DocumentMeta(
+            company_id="phoenix", domain="health", appendix_name="גילוי נאות - ניתוחים בישראל"
+        ),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    assert matches[0].status == MatchStatus.AUTO_CONFIRMED
+
+
+def test_downgraded_to_pending_review_when_no_lexical_overlap() -> None:
+    """A high embedding score alone isn't enough: if both documents have
+    descriptive metadata (appendix_name/coverage_type/coverage_name) and it
+    shares no meaningful word, the match starts as pending_review even
+    though its similarity score is above the auto-confirm threshold - this
+    is exactly the real-world failure mode found live (two near-empty
+    documents embedding to the same generic text and "matching" at ~1.0
+    with no actual relationship)."""
+    embeddings = {
+        "migdal:a": [1.0, 0.0],
+        "phoenix:a": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:a": DocumentMeta(
+            company_id="migdal",
+            domain="health",
+            appendix_name="שאלון בריאות אישי",
+            coverage_type="ביטוח חיים",
+        ),
+        "phoenix:a": DocumentMeta(
+            company_id="phoenix",
+            domain="health",
+            appendix_name="פירוט מסמכים נדרשים",
+            coverage_type="ביטוח חיים",
+        ),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    assert matches[0].similarity_score >= 0.95
+    assert matches[0].status == MatchStatus.PENDING_REVIEW
+
+
+def test_lexical_gate_skipped_when_neither_side_has_metadata() -> None:
+    """Callers that don't supply appendix_name/coverage_type/coverage_name
+    at all (e.g. this test suite's other cases, or any future caller with
+    no descriptive metadata available) must behave exactly as before the
+    lexical gate was added - status decided by similarity score alone."""
+    embeddings = {
+        "migdal:a": [1.0, 0.0],
+        "phoenix:a": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:a": DocumentMeta(company_id="migdal", domain="health"),
+        "phoenix:a": DocumentMeta(company_id="phoenix", domain="health"),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    assert matches[0].status == MatchStatus.AUTO_CONFIRMED
+
+
+def test_matches_one_per_other_company_not_a_single_global_best() -> None:
+    """A document must get a match against every other company, not just
+    the single highest-scoring company overall (the bug this guards
+    against: a Migdal appendix that best-matches Phoenix would silently
+    hide an equally valid match with Clal)."""
+    embeddings = {
+        "migdal:a": [1.0, 0.0],
+        "phoenix:a": [0.99, 0.14106736],  # slightly closer to migdal:a...
+        "clal:a": [0.98, 0.19866933],  # ...but clal:a is still a good match and must not be dropped
+    }
+    meta = {
+        "migdal:a": DocumentMeta(company_id="migdal", domain="health"),
+        "phoenix:a": DocumentMeta(company_id="phoenix", domain="health"),
+        "clal:a": DocumentMeta(company_id="clal", domain="health"),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    matched_companies = {
+        meta[m.matched_document_id].company_id for m in matches if m.document_id == "migdal:a"
+    }
+    assert matched_companies == {"phoenix", "clal"}

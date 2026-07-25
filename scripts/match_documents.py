@@ -1,9 +1,16 @@
 """Compute cross-company document matches from existing embeddings.
 
-For every embedded document, finds its best-matching document from another
-company in the same domain (health/life), and records the pairing with a
-status: auto_confirmed (similarity >= threshold) or pending_review
-(below it, needs a human look via the dashboard).
+For every embedded document, finds its best-matching document from *each*
+other company in the same domain (health/life), and records each pairing
+with a status: auto_confirmed (similarity >= threshold AND the two
+documents' appendix_name/coverage_type/coverage_name share a meaningful
+word - see core.matching.similarity._lexically_corroborated) or
+pending_review otherwise, needing a human look via the dashboard.
+
+Re-running this script recomputes the full match set from scratch and
+replaces all previously auto-generated rows (auto_confirmed/pending_review)
+- it never touches rows a human has already reviewed via the dashboard
+(confirmed/rejected), so manual review decisions survive re-runs.
 
 Usage: python scripts/match_documents.py
 """
@@ -15,16 +22,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import delete, select  # noqa: E402
 
 from core.config.settings import get_settings  # noqa: E402
-from core.database.models import Document, DocumentEmbedding, DocumentMatch  # noqa: E402
+from core.database.models import (  # noqa: E402
+    Document,
+    DocumentEmbedding,
+    DocumentExtraction,
+    DocumentMatch,
+)
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.matching.similarity import DocumentMeta, find_cross_company_matches  # noqa: E402
 from core.models.enums import MatchStatus  # noqa: E402
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
+
+_HUMAN_REVIEWED_STATUSES = (MatchStatus.CONFIRMED.value, MatchStatus.REJECTED.value)
 
 
 def main() -> None:
@@ -36,10 +50,28 @@ def main() -> None:
         embeddings_by_doc = {
             row.document_id: row.embedding for row in session.scalars(select(DocumentEmbedding))
         }
+        extractions_by_doc = {
+            row.document_id: row for row in session.scalars(select(DocumentExtraction))
+        }
         doc_meta = {
-            d.id: DocumentMeta(company_id=d.company_id, domain=d.domain)
+            d.id: DocumentMeta(
+                company_id=d.company_id,
+                domain=d.domain,
+                appendix_name=d.appendix_name,
+                coverage_type=(
+                    extractions_by_doc[d.id].coverage_type if d.id in extractions_by_doc else None
+                ),
+                coverage_name=(
+                    extractions_by_doc[d.id].coverage_name if d.id in extractions_by_doc else None
+                ),
+            )
             for d in session.scalars(select(Document))
         }
+        protected_ids = set(
+            session.scalars(
+                select(DocumentMatch.id).where(DocumentMatch.status.in_(_HUMAN_REVIEWED_STATUSES))
+            )
+        )
 
     if not embeddings_by_doc:
         logger.info("No embeddings yet - nothing to match.")
@@ -48,11 +80,21 @@ def main() -> None:
     matches = find_cross_company_matches(embeddings_by_doc, doc_meta)
     logger.info("Computed %d candidate matches", len(matches))
 
+    with session_scope() as session:
+        session.execute(
+            delete(DocumentMatch).where(DocumentMatch.status.notin_(_HUMAN_REVIEWED_STATUSES))
+        )
+
     auto_confirmed = 0
     pending_review = 0
+    skipped_protected = 0
     for match in matches:
+        match_id = f"{match.document_id}:{match.matched_document_id}"
+        if match_id in protected_ids:
+            skipped_protected += 1
+            continue
         row = DocumentMatch(
-            id=f"{match.document_id}:{match.matched_document_id}",
+            id=match_id,
             document_id=match.document_id,
             matched_document_id=match.matched_document_id,
             similarity_score=match.similarity_score,
@@ -65,7 +107,12 @@ def main() -> None:
         else:
             pending_review += 1
 
-    logger.info("Done. auto_confirmed=%d pending_review=%d", auto_confirmed, pending_review)
+    logger.info(
+        "Done. auto_confirmed=%d pending_review=%d skipped_protected=%d",
+        auto_confirmed,
+        pending_review,
+        skipped_protected,
+    )
 
 
 if __name__ == "__main__":

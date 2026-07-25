@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -140,6 +141,48 @@ def test_get_extraction_handles_document_ids_containing_slashes() -> None:
             session.query(DocumentExtraction).filter_by(document_id=document_id).delete()
             session.delete(session.get(Document, document_id))
             session.delete(session.get(Company, company_id))
+
+
+def test_get_document_file_returns_404_when_document_missing() -> None:
+    response = client.get(f"/api/documents/{uuid.uuid4()}/file")
+    assert response.status_code == 404
+
+
+def test_get_document_file_returns_404_when_missing_on_disk(two_documents: list[str]) -> None:
+    """The DB row exists but no file was ever written for it (e.g. wiped
+    from disk out-of-band) - should 404, not throw."""
+    response = client.get(f"/api/documents/{two_documents[0]}/file")
+    assert response.status_code == 404
+
+
+def test_get_document_file_serves_inline_by_default(
+    two_documents: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    doc_a = two_documents[0]
+    file_dir = tmp_path / "raw_documents" / "health"
+    file_dir.mkdir(parents=True)
+    (file_dir / f"{doc_a}.pdf").write_bytes(b"%PDF-1.4 test content")
+
+    response = client.get(f"/api/documents/{doc_a}/file")
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4 test content"
+    assert response.headers["content-type"] == "application/pdf"
+    assert "inline" in response.headers["content-disposition"]
+
+
+def test_get_document_file_download_sets_attachment_disposition(
+    two_documents: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    doc_a = two_documents[0]
+    file_dir = tmp_path / "raw_documents" / "health"
+    file_dir.mkdir(parents=True)
+    (file_dir / f"{doc_a}.pdf").write_bytes(b"%PDF-1.4 test content")
+
+    response = client.get(f"/api/documents/{doc_a}/file", params={"download": "true"})
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
 
 
 def test_list_matches_filters_by_status(two_documents: list[str]) -> None:

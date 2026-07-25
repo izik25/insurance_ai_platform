@@ -18,11 +18,13 @@ logger = get_logger(__name__)
 
 app = FastAPI(title=settings.app_name)
 
-# Vite's default dev server port - the dashboard frontend runs separately
-# from this API during development.
+# Vite's default dev server port, plus its next few fallback ports - if
+# another project on the machine is already using 5173, Vite silently picks
+# 5174/5175/etc instead, so the dashboard frontend could be on any of these
+# during development.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[f"http://localhost:{port}" for port in range(5173, 5178)],
     allow_methods=["GET", "PATCH"],
     allow_headers=["*"],
 )

@@ -6,7 +6,10 @@ produced by scripts/{extract,embed,match}_documents.py.
 
 from __future__ import annotations
 
+import mimetypes
+
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from api.schemas import (
@@ -17,6 +20,7 @@ from api.schemas import (
     MatchStatusUpdate,
     PolicyTableOut,
 )
+from core.config.settings import get_settings
 from core.database.models import Document, DocumentEmbedding, DocumentExtraction, DocumentMatch
 from core.database.session import session_scope
 
@@ -80,6 +84,37 @@ def get_extraction(document_id: str) -> ExtractionOut:
             survival_period=row.survival_period,
             created_date=row.created_date,
         )
+
+
+@router.get("/documents/{document_id:path}/file")
+def get_document_file(document_id: str, download: bool = False) -> FileResponse:
+    """Serve the original source file for a document, so a reviewer can
+    open (or download) it to verify extracted/matched data against it."""
+    with session_scope() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        file_path = document.file_path
+        original_file_name = document.original_file_name
+
+    settings = get_settings()
+    raw_documents_dir = settings.raw_documents_dir.resolve()
+    resolved_path = (raw_documents_dir / file_path).resolve()
+    if resolved_path != raw_documents_dir and raw_documents_dir not in resolved_path.parents:
+        # file_path is stored server-side, not attacker-controlled, but this
+        # guards against a corrupted/misconfigured row pointing outside the
+        # documents directory.
+        raise HTTPException(status_code=404, detail="Document file not found")
+    if not resolved_path.is_file():
+        raise HTTPException(status_code=404, detail="Document file not found on disk")
+
+    media_type, _ = mimetypes.guess_type(original_file_name)
+    return FileResponse(
+        resolved_path,
+        media_type=media_type or "application/octet-stream",
+        filename=original_file_name,
+        content_disposition_type="attachment" if download else "inline",
+    )
 
 
 def _document_summary(document: Document) -> MatchDocumentSummary:

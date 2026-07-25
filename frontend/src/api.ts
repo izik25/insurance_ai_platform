@@ -89,6 +89,13 @@ export async function fetchMatchesForDocument(documentId: string): Promise<Match
   return response.json();
 }
 
+export function getDocumentFileUrl(documentId: string, options?: { download?: boolean }): string {
+  // document_id contains literal "/" - same {..:path} route pattern/encoding as fetchExtraction.
+  const encodedPath = documentId.split("/").map(encodeURIComponent).join("/");
+  const url = `${API_BASE}/documents/${encodedPath}/file`;
+  return options?.download ? `${url}?download=true` : url;
+}
+
 export async function updateMatchStatus(
   matchId: string,
   status: "confirmed" | "rejected"

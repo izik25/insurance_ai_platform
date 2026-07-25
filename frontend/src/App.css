@@ -301,6 +301,29 @@ tbody tr.selected {
   margin-bottom: 16px;
 }
 
+.source-file-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.source-file-link {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid #2f6fed;
+  background: #2f6fed;
+  color: #fff;
+}
+
+.source-file-link-secondary {
+  background: none;
+  color: #2f6fed;
+}
+
 .confirm-button,
 .reject-button {
   padding: 8px 20px;
