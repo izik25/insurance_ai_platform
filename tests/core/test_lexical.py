@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from core.matching.lexical import combined_tokens, extract_tokens, has_lexical_overlap
+from core.matching.lexical import (
+    combined_tokens,
+    extract_tokens,
+    group_scope_signature,
+    has_lexical_overlap,
+)
 
 
 def test_extract_tokens_filters_generic_insurance_terms() -> None:
@@ -91,6 +96,33 @@ def test_real_singular_plural_match_shows_overlap() -> None:
     bag_a = combined_tokens("פיצוי לאשפוז עקב ניתוח", "ביטוח נוסף לאישפוז עקב ניתוח", "פיצוי לאישפוז עקב ניתוח")
     bag_b = combined_tokens("ביטוח ניתוחיים פלוס, נספח 125", "ביטוח רפואי לניתוחים", "ביטוח ניתוחים פלוס")
     assert has_lexical_overlap(bag_a, bag_b)
+
+
+def test_group_scope_signature_none_when_no_marker() -> None:
+    assert group_scope_signature("שלב", "אובדן כושר עבודה") is None
+    assert group_scope_signature(None, None) is None
+
+
+def test_group_scope_signature_extracts_employer_not_marker_word() -> None:
+    # "בנק"/"עובדי"/"לעובדי" are markers, not part of the signature itself -
+    # otherwise two different banks would spuriously "match" on "בנק".
+    sig = group_scope_signature("הסכם אובדן כושר עבודה לעובדי בנק הפועלים", None)
+    assert sig is not None
+    assert "הפועלים" in sig
+    assert "בנק" not in sig
+    assert "עובדי" not in sig
+
+
+def test_group_scope_signature_different_employers_dont_overlap() -> None:
+    sig_a = group_scope_signature("עובדי בנק הפועלים", None)
+    sig_b = group_scope_signature("עובדי בנק לאומי", None)
+    assert not has_lexical_overlap(sig_a, sig_b)
+
+
+def test_group_scope_signature_same_employer_different_phrasing_overlaps() -> None:
+    sig_a = group_scope_signature("הסכם אובדן כושר עבודה לעובדי בנק הפועלים", None)
+    sig_b = group_scope_signature('בנק הפועלים בע"מ (סכומי ביטוח מדורגים)', None)
+    assert has_lexical_overlap(sig_a, sig_b)
 
 
 def test_real_good_match_shows_overlap() -> None:

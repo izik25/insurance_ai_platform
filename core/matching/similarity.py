@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from core.config.settings import get_settings
-from core.matching.lexical import combined_tokens, has_lexical_overlap
+from core.matching.lexical import combined_tokens, group_scope_signature, has_lexical_overlap
 from core.models.enums import MatchStatus
 
 
@@ -48,14 +48,34 @@ class MatchCandidate:
 
 
 def _lexically_corroborated(meta: DocumentMeta, other_meta: DocumentMeta) -> bool:
-    """Do these two documents' descriptive fields share a meaningful word?
+    """Do these two documents' descriptive fields share a meaningful word -
+    and, if either is restricted to a specific employer/organization, is the
+    other restricted to that *same* one?
 
     Skipped (treated as corroborated) when neither side has any of
     appendix_name/coverage_type/coverage_name available at all - there's
     nothing to compare, so this isn't evidence against the match (this also
     keeps callers that don't pass this metadata, e.g. existing tests,
     behaving exactly as before).
+
+    The group-scope check runs first and can reject a pair the plain word
+    overlap below would otherwise wave through: a document scoped to one
+    employer (group_scope_signature returns non-None) must not corroborate
+    against a document with no scoping at all, or scoped to a *different*
+    employer - see group_scope_signature's docstring for the real case this
+    was written for (a Bank Hapoalim-only group policy matching hundreds of
+    unrelated general-population appendices on the word "אובדן כושר עבודה"
+    alone).
     """
+    scope = group_scope_signature(meta.appendix_name, meta.coverage_name)
+    other_scope = group_scope_signature(other_meta.appendix_name, other_meta.coverage_name)
+    if (scope is None) != (other_scope is None):
+        return False
+    if scope is not None and other_scope is not None and not has_lexical_overlap(
+        scope, other_scope
+    ):
+        return False
+
     has_metadata = bool(meta.appendix_name or meta.coverage_type or meta.coverage_name) and bool(
         other_meta.appendix_name or other_meta.coverage_type or other_meta.coverage_name
     )

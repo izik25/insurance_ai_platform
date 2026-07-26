@@ -151,6 +151,37 @@ def test_lexical_gate_skipped_when_neither_side_has_metadata() -> None:
     assert matches[0].status == MatchStatus.AUTO_CONFIRMED
 
 
+def test_employer_scoped_policy_does_not_auto_confirm_against_general_product() -> None:
+    """Regression test for a real corpus finding: a Clal group disability
+    policy restricted to Bank Hapoalim employees only was the best
+    cross-company match for 263 unrelated, general-population disability
+    appendices (auto-confirming 257 of them) - identical high embedding
+    score and a shared word ("אובדן כושר עבודה") aren't enough; a policy
+    scoped to one employer must not corroborate against a product anyone
+    can buy."""
+    embeddings = {
+        "clal:a": [1.0, 0.0],
+        "migdal:a": [1.0, 0.0],
+    }
+    meta = {
+        "clal:a": DocumentMeta(
+            company_id="clal",
+            domain="life",
+            appendix_name="הסכם אובדן כושר עבודה לעובדי בנק הפועלים",
+            coverage_type="אובדן כושר עבודה קבוצתי",
+        ),
+        "migdal:a": DocumentMeta(
+            company_id="migdal",
+            domain="life",
+            appendix_name="שלב",
+            coverage_type="אובדן כושר עבודה",
+        ),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    assert matches[0].status == MatchStatus.PENDING_REVIEW
+
+
 def test_matches_one_per_other_company_not_a_single_global_best() -> None:
     """A document must get a match against every other company, not just
     the single highest-scoring company overall (the bug this guards

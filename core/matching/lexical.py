@@ -90,6 +90,46 @@ def combined_tokens(*texts: str | None) -> set[str]:
     return tokens
 
 
+_GROUP_SCOPE_MARKER_WORDS = {"בנק", "עיריית", "עירית", "עיריות", "עובדי", "לעובדי"}
+_GROUP_SCOPE_MENTION = re.compile(
+    r"(?:בנק|עיריית|עירית|עובדי|לעובדי)\s+([א-ת]+(?:\s+[א-ת]+)?)"
+)
+
+
+def group_scope_signature(*texts: str | None) -> set[str] | None:
+    """Which specific employer/organization/municipality, if any, is this
+    document's coverage restricted to?
+
+    Returns `None` when no scoping marker ("בנק"/"עיריית"/"עובדי"/"לעובדי" -
+    "bank"/"municipality of"/"employees of") is present at all - i.e. this
+    looks like a general-population product, not a group policy tied to one
+    employer. Returns a (possibly empty) token set otherwise, built only from
+    the word(s) *following* the marker so the marker itself never becomes
+    part of the signature (it would otherwise wrongly "match" two different
+    employers that both happen to say "בנק"/"עובדי").
+
+    Confirmed live: a Clal group disability policy scoped to Bank Hapoalim
+    employees only ("הסכם אובדן כושר עבודה לעובדי בנק הפועלים") was picked as
+    the best cross-company match for 263 unrelated, general-population
+    disability appendices at every other company - its extracted
+    eligibility_conditions is boilerplate ("employees of the policyholder",
+    true of any employer's group policy), so the only place the Bank
+    Hapoalim restriction actually appears is this document's own
+    appendix_name/coverage_name. Plain word-overlap on generic terms like
+    "אובדן כושר עבודה" can't tell a Bank Hapoalim-only policy apart from a
+    product anyone can buy - this is the missing signal.
+    """
+    tokens: set[str] = set()
+    found_marker = False
+    for text in texts:
+        if not text:
+            continue
+        for match in _GROUP_SCOPE_MENTION.finditer(text):
+            found_marker = True
+            tokens |= extract_tokens(match.group(1)) - _GROUP_SCOPE_MARKER_WORDS
+    return tokens if found_marker else None
+
+
 def has_lexical_overlap(bag_a: set[str], bag_b: set[str]) -> bool:
     """Do these two token bags share a meaningful word?
 
