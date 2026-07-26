@@ -37,3 +37,21 @@ def test_real_ocr_sample_from_migdal() -> None:
         "נספח 101\n"
     )
     assert find_appendix_numbers(text) == ["101"]
+
+
+def test_ocr_misread_of_nispach_as_natpach() -> None:
+    # Real corpus finding: a Migdal document (8049_512701095.pdf) whose real
+    # appendix number, 970-971, was printed clearly enough for OCR to read
+    # the digits correctly, but the OCR engine misread the label itself
+    # ("נספח" -> "נטפח", ס confused for ט) - so the old regex (which only
+    # recognized "נספח") found nothing and the extractor fell back to a
+    # useless 9-digit filename hint instead of the real number.
+    assert find_appendix_numbers("נטפח 970-971") == ["970", "971"]
+
+
+def test_appendix_mention_with_mas_abbreviation() -> None:
+    # Real corpus finding: a Migdal document (8148_533200291.pdf) whose
+    # footer read "נספח מס'-801-806/91" - the old regex required the number
+    # to follow "נספח" directly and didn't know about the "מס'" ("no.")
+    # abbreviation some documents insert in between.
+    assert find_appendix_numbers("נספח מס'-801-806/91") == ["801", "806"]
