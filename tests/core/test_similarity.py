@@ -101,14 +101,16 @@ def test_auto_confirmed_when_appendix_names_share_a_word() -> None:
     assert matches[0].status == MatchStatus.AUTO_CONFIRMED
 
 
-def test_downgraded_to_pending_review_when_no_lexical_overlap() -> None:
+def test_excluded_entirely_when_no_lexical_overlap() -> None:
     """A high embedding score alone isn't enough: if both documents have
     descriptive metadata (appendix_name/coverage_type/coverage_name) and it
-    shares no meaningful word, the match starts as pending_review even
-    though its similarity score is above the auto-confirm threshold - this
-    is exactly the real-world failure mode found live (two near-empty
-    documents embedding to the same generic text and "matching" at ~1.0
-    with no actual relationship)."""
+    shares no meaningful word, no match is recorded at all - not even as
+    pending_review - even though its similarity score is above the
+    auto-confirm threshold. This is exactly the real-world failure mode
+    found live (two near-empty documents embedding to the same generic text
+    and "matching" at ~1.0 with no actual relationship): "definitely
+    unrelated" shouldn't occupy a slot in the pending-review queue the way
+    "maybe related, needs a human look" should."""
     embeddings = {
         "migdal:a": [1.0, 0.0],
         "phoenix:a": [1.0, 0.0],
@@ -128,9 +130,7 @@ def test_downgraded_to_pending_review_when_no_lexical_overlap() -> None:
         ),
     }
 
-    matches = find_cross_company_matches(embeddings, meta)
-    assert matches[0].similarity_score >= 0.95
-    assert matches[0].status == MatchStatus.PENDING_REVIEW
+    assert find_cross_company_matches(embeddings, meta) == []
 
 
 def test_lexical_gate_skipped_when_neither_side_has_metadata() -> None:
@@ -151,14 +151,15 @@ def test_lexical_gate_skipped_when_neither_side_has_metadata() -> None:
     assert matches[0].status == MatchStatus.AUTO_CONFIRMED
 
 
-def test_employer_scoped_policy_does_not_auto_confirm_against_general_product() -> None:
+def test_employer_scoped_policy_excluded_against_general_product() -> None:
     """Regression test for a real corpus finding: a Clal group disability
     policy restricted to Bank Hapoalim employees only was the best
     cross-company match for 263 unrelated, general-population disability
     appendices (auto-confirming 257 of them) - identical high embedding
     score and a shared word ("אובדן כושר עבודה") aren't enough; a policy
     scoped to one employer must not corroborate against a product anyone
-    can buy."""
+    can buy. With only these two candidates, and no other Migdal document
+    for this document to fall back to, no match is recorded at all."""
     embeddings = {
         "clal:a": [1.0, 0.0],
         "migdal:a": [1.0, 0.0],
@@ -178,8 +179,43 @@ def test_employer_scoped_policy_does_not_auto_confirm_against_general_product() 
         ),
     }
 
+    assert find_cross_company_matches(embeddings, meta) == []
+
+
+def test_falls_back_to_next_best_candidate_when_top_one_is_uncorroborated() -> None:
+    """The new "skip an uncorroborated top candidate" behavior must not
+    throw away a company's match entirely when a *different*, corroborated
+    candidate from that same company is available - only the specific
+    uncorroborated document is skipped, not the whole company."""
+    embeddings = {
+        "migdal:a": [1.0, 0.0],
+        "phoenix:unrelated": [0.999, 0.0447],  # highest score, but no lexical overlap at all
+        "phoenix:related": [0.9, 0.43588989],  # lower score, but shares a real content word
+    }
+    meta = {
+        "migdal:a": DocumentMeta(
+            company_id="migdal",
+            domain="health",
+            appendix_name="ניתוחים בישראל",
+            coverage_type="ביטוח בריאות",
+        ),
+        "phoenix:unrelated": DocumentMeta(
+            company_id="phoenix",
+            domain="health",
+            appendix_name="פירוט מסמכים נדרשים",
+            coverage_type="ביטוח בריאות",
+        ),
+        "phoenix:related": DocumentMeta(
+            company_id="phoenix",
+            domain="health",
+            appendix_name="גילוי נאות - ניתוחים בחו״ל",
+            coverage_type="ביטוח בריאות",
+        ),
+    }
+
     matches = find_cross_company_matches(embeddings, meta)
-    assert matches[0].status == MatchStatus.PENDING_REVIEW
+    by_doc = {m.document_id: m for m in matches}
+    assert by_doc["migdal:a"].matched_document_id == "phoenix:related"
 
 
 def test_matches_one_per_other_company_not_a_single_global_best() -> None:

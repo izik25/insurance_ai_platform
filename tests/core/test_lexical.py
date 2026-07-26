@@ -12,6 +12,17 @@ def test_extract_tokens_filters_generic_insurance_terms() -> None:
     assert extract_tokens("ביטוח חיים") == set()
 
 
+def test_extract_tokens_filters_both_plene_and_defective_spellings() -> None:
+    # Real corpus finding: "תוכנית" (plene/"מלא" spelling of "plan") wasn't
+    # filtered because only "תכנית" (defective/"חסר" spelling) was in the
+    # generic-terms list - a Migdal document whose entire appendix_name was
+    # "תנאים כלליים לתוכנית ביטוח בריאות" (nothing but boilerplate) ended up
+    # with "לתוכנית" as its only surviving "content" token, which then
+    # spuriously "corroborated" against an unrelated Phoenix product just
+    # because it also happened to say "תוכנית".
+    assert extract_tokens("לתוכנית ביטוח בריאות") == set()
+
+
 def test_extract_tokens_filters_prefixed_generic_terms() -> None:
     # "לביטוח"/"וחיים" etc. are prefixed forms of generic terms, not content
     assert extract_tokens("לביטוח וחיים") == set()

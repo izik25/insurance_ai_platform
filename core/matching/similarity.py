@@ -9,14 +9,24 @@ scale.
 Embedding similarity alone can be fooled by near-empty extractions (see
 core.matching.lexical's module docstring: two documents the LLM found
 almost nothing in both reduce to the same short generic embedding text and
-"match" at a near-perfect score with no real relationship). AUTO_CONFIRMED
-status therefore additionally requires the two documents' appendix_name/
-coverage_type/coverage_name to share a meaningful word wherever that
-metadata is actually available - confirmed live against the real corpus
-(59 of 65 matches scoring >=0.999 were exactly this empty-extraction
-pattern). This never changes WHICH document is selected as a company's
-best match, only whether that match starts out auto-confirmed or waits
-for a human to confirm it via the dashboard.
+"match" at a near-perfect score with no real relationship) and by group
+policies scoped to one employer (see group_scope_signature's docstring).
+Lexical corroboration (appendix_name/coverage_type/coverage_name sharing a
+meaningful word, and compatible employer/group scope) therefore gates two
+things, not just one:
+
+- WHICH candidate is picked as a company's match at all: a company's
+  highest-scoring document is only chosen if it's corroborated: an
+  uncorroborated top candidate is skipped in favor of the next-best
+  corroborated one, and if *no* candidate from a company is corroborated,
+  that company contributes no match for this document at all - "not
+  related at all" is not the same as "maybe related, needs a human look",
+  and shouldn't occupy a slot in the pending-review queue (confirmed live:
+  a corrupted-extraction Clal document scoring >=0.97 against dozens of
+  totally unrelated life-insurance appendices from every other company was
+  cluttering pending_review with obvious non-matches).
+- Among corroborated candidates, similarity score alone then decides
+  AUTO_CONFIRMED vs PENDING_REVIEW.
 """
 
 from __future__ import annotations
@@ -93,7 +103,7 @@ def find_cross_company_matches(
     embeddings_by_doc: dict[str, list[float]],
     doc_meta: dict[str, DocumentMeta],
 ) -> list[MatchCandidate]:
-    """For each document, find its best-matching document from *each* other company.
+    """For each document, find its best *corroborated* match from each other company.
 
     Restricted to the same `domain` (health/life) and a different
     `company_id` - comparing a health appendix to a life appendix, or a
@@ -106,6 +116,13 @@ def find_cross_company_matches(
     Embeddings are assumed pre-normalized (see
     `core.embeddings.model.embed_texts`), so cosine similarity is a plain
     dot product.
+
+    Within one company, candidates are tried highest-scoring first, and the
+    first one that passes `_lexically_corroborated` wins; a candidate that
+    fails it is skipped in favor of the next-best one rather than being
+    recorded as a low-confidence match, and if none of a company's
+    candidates are corroborated, that company contributes nothing for this
+    document at all.
     """
     threshold = get_settings().similarity_auto_confirm_threshold
     doc_ids = [d for d in embeddings_by_doc if d in doc_meta]
@@ -118,7 +135,7 @@ def find_cross_company_matches(
     matches: list[MatchCandidate] = []
     for i, document_id in enumerate(doc_ids):
         meta = doc_meta[document_id]
-        best_by_company: dict[str, tuple[int, float]] = {}
+        candidates_by_company: dict[str, list[tuple[int, float]]] = {}
         for j, other_id in enumerate(doc_ids):
             if i == j:
                 continue
@@ -126,24 +143,27 @@ def find_cross_company_matches(
             if other_meta.company_id == meta.company_id or other_meta.domain != meta.domain:
                 continue
             score = float(similarity[i, j])
-            current = best_by_company.get(other_meta.company_id)
-            if current is None or score > current[1]:
-                best_by_company[other_meta.company_id] = (j, score)
+            candidates_by_company.setdefault(other_meta.company_id, []).append((j, score))
 
-        for best_index, best_score in best_by_company.values():
-            other_meta = doc_meta[doc_ids[best_index]]
-            status = (
-                MatchStatus.AUTO_CONFIRMED
-                if best_score >= threshold and _lexically_corroborated(meta, other_meta)
-                else MatchStatus.PENDING_REVIEW
-            )
-            matches.append(
-                MatchCandidate(
-                    document_id=document_id,
-                    matched_document_id=doc_ids[best_index],
-                    similarity_score=best_score,
-                    status=status,
+        for candidates in candidates_by_company.values():
+            candidates.sort(key=lambda pair: pair[1], reverse=True)
+            for candidate_index, candidate_score in candidates:
+                other_meta = doc_meta[doc_ids[candidate_index]]
+                if not _lexically_corroborated(meta, other_meta):
+                    continue
+                status = (
+                    MatchStatus.AUTO_CONFIRMED
+                    if candidate_score >= threshold
+                    else MatchStatus.PENDING_REVIEW
                 )
-            )
+                matches.append(
+                    MatchCandidate(
+                        document_id=document_id,
+                        matched_document_id=doc_ids[candidate_index],
+                        similarity_score=candidate_score,
+                        status=status,
+                    )
+                )
+                break
 
     return matches
