@@ -52,7 +52,17 @@ class Settings(BaseSettings):
     # llm_extract.py's client.
     extraction_model: str = "gpt-4.1-mini"
     embedding_model_name: str = "intfloat/multilingual-e5-large"
-    similarity_auto_confirm_threshold: float = 0.95
+    # 0.90, not the more obvious 0.95: with lexical corroboration mandatory
+    # for every auto-confirm regardless of this threshold (see
+    # core/matching/similarity._lexically_corroborated), raw embedding
+    # score alone no longer has to carry the whole precision burden. Sampled
+    # live against the real corpus: pairs scoring 0.90-0.95 that also pass
+    # lexical corroboration are genuine matches (~90% in a 20-pair sample,
+    # e.g. "אובדן כושר עבודה" / "סיעוד" / "מחלות קשות" pairs phrased
+    # differently per company) - keeping the bar at 0.95 was leaving
+    # thousands of these sitting in pending_review for no real precision
+    # gain. Below 0.90 was not sampled - left untouched.
+    similarity_auto_confirm_threshold: float = 0.90
 
     @property
     def raw_documents_dir(self) -> Path:
