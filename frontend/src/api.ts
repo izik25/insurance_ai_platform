@@ -1,4 +1,9 @@
-const API_BASE = "http://127.0.0.1:8000/api";
+// Relative paths: in production nginx proxies these to the backend
+// container (see frontend/nginx.conf), and in local dev the Vite dev
+// server proxies them to localhost:8000 (see vite.config.ts) - so this
+// works unchanged in both environments.
+const API_BASE = "/api";
+const PUBLIC_API_BASE = "/public/v1";
 
 export interface DocumentOut {
   id: string;
@@ -94,6 +99,94 @@ export function getDocumentFileUrl(documentId: string, options?: { download?: bo
   const encodedPath = documentId.split("/").map(encodeURIComponent).join("/");
   const url = `${API_BASE}/documents/${encodedPath}/file`;
   return options?.download ? `${url}?download=true` : url;
+}
+
+export function getPublicAppendixFileUrl(companyId: string, appendixNumber: string): string {
+  return `${PUBLIC_API_BASE}/companies/${encodeURIComponent(companyId)}/appendices/${encodeURIComponent(appendixNumber)}/file`;
+}
+
+export interface PublicAppendixFileResult {
+  requestUrl: string;
+  status: number;
+  ok: boolean;
+  contentType: string | null;
+  contentLength: number | null;
+  fileName: string | null;
+  blobUrl: string | null;
+  errorDetail: string | null;
+}
+
+/** Calls the real public appendix-lookup API (api/public_routes.py) exactly as
+ * an external, unauthenticated caller would - not an internal dashboard route. */
+export async function callPublicAppendixApi(
+  companyId: string,
+  appendixNumber: string
+): Promise<PublicAppendixFileResult> {
+  const requestUrl = getPublicAppendixFileUrl(companyId, appendixNumber);
+  const response = await fetch(requestUrl);
+  const contentType = response.headers.get("content-type");
+  const contentDisposition = response.headers.get("content-disposition");
+  // Non-ASCII original_file_name values (Hebrew is the common case here) make
+  // Starlette emit RFC 5987 filename*=UTF-8''<percent-encoded> instead of a
+  // plain filename="..." - check that form first, decode it, then fall back.
+  const fileNameStarMatch = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i);
+  const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  const fileName = fileNameStarMatch
+    ? decodeURIComponent(fileNameStarMatch[1])
+    : (fileNameMatch?.[1] ?? null);
+
+  if (!response.ok) {
+    let errorDetail: string | null = null;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      errorDetail = body.detail ?? null;
+    } catch {
+      // Error body wasn't JSON - leave errorDetail null, status code still shown.
+    }
+    return {
+      requestUrl,
+      status: response.status,
+      ok: false,
+      contentType,
+      contentLength: null,
+      fileName,
+      blobUrl: null,
+      errorDetail,
+    };
+  }
+
+  const blob = await response.blob();
+  return {
+    requestUrl,
+    status: response.status,
+    ok: true,
+    contentType,
+    contentLength: blob.size,
+    fileName,
+    blobUrl: URL.createObjectURL(blob),
+    errorDetail: null,
+  };
+}
+
+export interface PublicAppendixMatch {
+  company_id: string;
+  appendix_number: string[];
+  appendix_name: string | null;
+  domain: string;
+  similarity_score: number;
+  status: string;
+}
+
+/** Calls the real public comparison endpoint - the cross-company appendices
+ * this one was matched to, with a similarity score and review status. */
+export async function fetchPublicAppendixMatches(
+  companyId: string,
+  appendixNumber: string
+): Promise<PublicAppendixMatch[]> {
+  const url = `${PUBLIC_API_BASE}/companies/${encodeURIComponent(companyId)}/appendices/${encodeURIComponent(appendixNumber)}/matches`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to load matches: ${response.status}`);
+  return response.json();
 }
 
 export async function updateMatchStatus(

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
+  callPublicAppendixApi,
   fetchDocuments,
   fetchExtraction,
   fetchMatches,
   fetchMatchesForDocument,
+  fetchPublicAppendixMatches,
   getDocumentFileUrl,
   updateMatchStatus,
   type DocumentOut,
   type ExtractionOut,
   type MatchOut,
+  type PublicAppendixFileResult,
+  type PublicAppendixMatch,
 } from "./api";
 import { overallScore, scoreComparison } from "./scoring";
 
@@ -895,12 +899,298 @@ function MultiComparisonModal({
   );
 }
 
+interface AppendixLookupResult {
+  appendixNumber: string;
+  fileResult: PublicAppendixFileResult;
+  // Only fetched when fileResult.ok (no document => nothing to compare).
+  // null = not applicable/not attempted, undefined-free by design.
+  matches: PublicAppendixMatch[] | null;
+  matchesError: string | null;
+}
+
+/** Splits "205, 310,, 205" into ["205", "310"] - trims, drops empties, dedupes
+ * while preserving input order (so the results list matches what was typed). */
+function parseAppendixNumbers(input: string): string[] {
+  const seen = new Set<string>();
+  const numbers: string[] = [];
+  for (const raw of input.split(",")) {
+    const n = raw.trim();
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      numbers.push(n);
+    }
+  }
+  return numbers;
+}
+
+function PublicApiDemoModal({
+  documents,
+  onClose,
+}: {
+  documents: DocumentOut[];
+  onClose: () => void;
+}) {
+  const companies = useMemo(
+    () => Array.from(new Set(documents.map((d) => d.company_id))).sort(),
+    [documents]
+  );
+  const [companyId, setCompanyId] = useState("");
+  const [appendixInput, setAppendixInput] = useState("");
+  const [calling, setCalling] = useState(false);
+  const [results, setResults] = useState<AppendixLookupResult[] | null>(null);
+
+  const knownAppendixNumbers = useMemo(() => {
+    if (!companyId) return [];
+    const numbers = new Set<string>();
+    for (const d of documents) {
+      if (d.company_id !== companyId) continue;
+      for (const n of d.appendix_number) numbers.add(n);
+    }
+    return Array.from(numbers).sort();
+  }, [documents, companyId]);
+
+  const parsedNumbers = useMemo(() => parseAppendixNumbers(appendixInput), [appendixInput]);
+
+  // Blob URLs created for downloaded files must be revoked when they're
+  // replaced or the modal closes, or they leak memory for the tab's lifetime.
+  useEffect(() => {
+    return () => {
+      results?.forEach(({ fileResult }) => {
+        if (fileResult.blobUrl) URL.revokeObjectURL(fileResult.blobUrl);
+      });
+    };
+  }, [results]);
+
+  const canCall = Boolean(companyId && parsedNumbers.length > 0);
+
+  const runCall = () => {
+    if (!canCall) return;
+    setCalling(true);
+    setResults(null);
+    // Each number is looked up with its own independent request against the
+    // real single-appendix endpoint - a 404 on one number doesn't affect the
+    // others, it's just reported next to that number's result. When the
+    // appendix is found, a second real call fetches its cross-company
+    // comparison (/matches) so the demo shows the actual comparison feature,
+    // not just the file lookup.
+    Promise.all(
+      parsedNumbers.map(async (appendixNumber) => {
+        const fileResult = await callPublicAppendixApi(companyId, appendixNumber);
+        let matches: PublicAppendixMatch[] | null = null;
+        let matchesError: string | null = null;
+        if (fileResult.ok) {
+          try {
+            matches = await fetchPublicAppendixMatches(companyId, appendixNumber);
+          } catch (err) {
+            matchesError = err instanceof Error ? err.message : "שגיאה בטעינת ההשוואה";
+          }
+        }
+        return { appendixNumber, fileResult, matches, matchesError };
+      })
+    )
+      .then(setResults)
+      .finally(() => setCalling(false));
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>הדגמה חיה — API פתוח לשליפת נספח לפי מספר</h2>
+          <button className="modal-close" onClick={onClose} aria-label="סגור">
+            ✕
+          </button>
+        </div>
+
+        <p className="muted small">
+          זו קריאת HTTP אמיתית לשרת - בדיוק כפי שצד שלישי חיצוני היה מבצע מול ה-API הפתוח
+          (ללא אימות, לא ה-API הפנימי של הדשבורד): בוחרים חברה ומספר נספח אחד או כמה (מופרדים
+          בפסיק), והשרת מתבצע חיפוש בנפרד לכל מספר לפי <span className="mono">company_id</span> +{" "}
+          <span className="mono">appendix_number</span> ומחזיר את קובץ המקור. אם מספר מסוים לא
+          נמצא, זה מוצג כשגיאה ליד אותו מספר בלבד - שאר המספרים מוצגים כרגיל. עבור כל נספח שנמצא,
+          נשלחת גם קריאה אמיתית שנייה ל-<span className="mono">/matches</span> - ההשוואה
+          חוצת-החברות שהמערכת כבר חישבה לנספח הזה.
+        </p>
+
+        <div className="picker-form">
+          <div className="picker-field">
+            <label>חברת ביטוח (company_id)</label>
+            <select
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                setAppendixInput("");
+                setResults(null);
+              }}
+            >
+              <option value="">בחר חברה...</option>
+              {companies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {companyId && (
+            <div className="picker-field">
+              <label>מספרי נספח (אפשר כמה, מופרדים בפסיק)</label>
+              <input
+                type="text"
+                list="public-api-demo-appendix-suggestions"
+                placeholder="לדוגמה: 205, 310, 12"
+                value={appendixInput}
+                onChange={(e) => {
+                  setAppendixInput(e.target.value);
+                  setResults(null);
+                }}
+              />
+              <datalist id="public-api-demo-appendix-suggestions">
+                {knownAppendixNumbers.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+              {knownAppendixNumbers.length > 0 && (
+                <p className="muted small">
+                  {knownAppendixNumbers.length} מספרי נספח ידועים לחברה זו (רשימת עזר בלבד - אפשר
+                  להקליד כל מספר, כולל כזה שלא קיים, כדי לבדוק גם תגובת שגיאה, ואפשר להקליד כמה
+                  מספרים מופרדים בפסיק).
+                </p>
+              )}
+            </div>
+          )}
+
+          {companyId && parsedNumbers.length > 0 && (
+            <div className="field-block">
+              <span className="field-label">
+                {parsedNumbers.length > 1
+                  ? `בקשות HTTP שיישלחו (${parsedNumbers.length})`
+                  : "בקשת HTTP שתישלח"}
+              </span>
+              {parsedNumbers.map((n) => (
+                <p className="mono small" key={n}>
+                  GET {getPublicApiRequestPreview(companyId, n)}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <button className="confirm-button" disabled={!canCall || calling} onClick={runCall}>
+            {calling ? "שולח בקשות..." : "בצע קריאה אמיתית ל-API"}
+          </button>
+
+          {results && (
+            <div className="api-result-list">
+              {results.map(({ appendixNumber, fileResult, matches, matchesError }) => (
+                <div
+                  key={appendixNumber}
+                  className={
+                    fileResult.ok ? "api-result api-result-success" : "api-result api-result-error"
+                  }
+                >
+                  {parsedNumbers.length > 1 && <p className="api-result-title">נספח {appendixNumber}</p>}
+                  <p>
+                    <strong>סטטוס תגובה:</strong> {fileResult.status} {fileResult.ok ? "✓" : "✕"}
+                  </p>
+                  {fileResult.ok ? (
+                    <>
+                      <p>
+                        <strong>Content-Type:</strong> {fileResult.contentType ?? "—"}
+                      </p>
+                      <p>
+                        <strong>גודל:</strong>{" "}
+                        {fileResult.contentLength != null
+                          ? `${(fileResult.contentLength / 1024).toFixed(1)} KB`
+                          : "—"}
+                      </p>
+                      <p>
+                        <strong>שם קובץ:</strong> {fileResult.fileName ?? "—"}
+                      </p>
+                      <div className="source-file-actions">
+                        <a
+                          className="source-file-link"
+                          href={fileResult.blobUrl ?? undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          📄 צפייה בנספח שהתקבל
+                        </a>
+                        <a
+                          className="source-file-link source-file-link-secondary"
+                          href={fileResult.blobUrl ?? undefined}
+                          download={fileResult.fileName ?? "appendix"}
+                        >
+                          ⬇ הורדה
+                        </a>
+                      </div>
+                      <div className="api-result-matches">
+                        <p className="field-label">
+                          GET /public/v1/companies/{companyId}/appendices/{appendixNumber}/matches
+                        </p>
+                        {matchesError && <p className="error">{matchesError}</p>}
+                        {!matchesError && matches && matches.length === 0 && (
+                          <p className="muted small">
+                            אין עדיין השוואה עבור נספח זה מול חברות אחרות.
+                          </p>
+                        )}
+                        {!matchesError && matches && matches.length > 0 && (
+                          <div className="table-wrap">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>חברה מקבילה</th>
+                                  <th>מספר נספח</th>
+                                  <th>שם נספח</th>
+                                  <th>דמיון</th>
+                                  <th>סטטוס</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {matches.map((m) => (
+                                  <tr key={`${m.company_id}:${m.appendix_number.join(",")}`}>
+                                    <td>{m.company_id}</td>
+                                    <td>{m.appendix_number.join(", ") || "—"}</td>
+                                    <td className="truncate" title={m.appendix_name ?? ""}>
+                                      {m.appendix_name ?? "—"}
+                                    </td>
+                                    <td className={m.similarity_score >= 0.95 ? "score-high" : "score-low"}>
+                                      {(m.similarity_score * 100).toFixed(1)}%
+                                    </td>
+                                    <td>{STATUS_LABELS[m.status] ?? m.status}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="error">{fileResult.errorDetail ?? "הבקשה נכשלה."}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Preview-only string - not used for the actual fetch (that's built inside
+// callPublicAppendixApi), just so the UI can show the exact URL beforehand.
+function getPublicApiRequestPreview(companyId: string, appendixNumber: string): string {
+  return `/public/v1/companies/${encodeURIComponent(companyId)}/appendices/${encodeURIComponent(appendixNumber)}/file`;
+}
+
 function App() {
   const [documents, setDocuments] = useState<DocumentOut[]>([]);
   const [autoConfirmed, setAutoConfirmed] = useState<MatchOut[]>([]);
   const [pendingReview, setPendingReview] = useState<MatchOut[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showComparisonPicker, setShowComparisonPicker] = useState(false);
+  const [showPublicApiDemo, setShowPublicApiDemo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewingMatch, setReviewingMatch] = useState<MatchOut | null>(null);
@@ -956,9 +1246,14 @@ function App() {
     <div className="app" dir="rtl">
       <header className="app-header">
         <h1>לוח בקרה — פלטפורמת עיבוד מסמכי ביטוח</h1>
-        <button className="compare-button" onClick={() => setShowComparisonPicker(true)}>
-          השוואה
-        </button>
+        <div className="header-actions">
+          <button className="compare-button" onClick={() => setShowComparisonPicker(true)}>
+            השוואה
+          </button>
+          <button className="compare-button" onClick={() => setShowPublicApiDemo(true)}>
+            הדגמת API פתוח
+          </button>
+        </div>
       </header>
 
       {loading && <p className="muted">טוען נתונים...</p>}
@@ -1038,6 +1333,10 @@ function App() {
           missingCompanies={multiComparison.missingCompanies}
           onClose={() => setMultiComparison(null)}
         />
+      )}
+
+      {showPublicApiDemo && (
+        <PublicApiDemoModal documents={documents} onClose={() => setShowPublicApiDemo(false)} />
       )}
     </div>
   );

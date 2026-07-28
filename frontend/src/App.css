@@ -17,6 +17,11 @@
   font-size: 1.4rem;
 }
 
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
 .compare-button {
   padding: 10px 24px;
   font-size: 1rem;
@@ -324,6 +329,47 @@ tbody tr.selected {
   color: #2f6fed;
 }
 
+.api-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.api-result {
+  margin-top: 4px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.api-result p {
+  margin: 4px 0;
+}
+
+.api-result-title {
+  font-weight: 700;
+}
+
+.api-result-matches {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.api-result-matches table {
+  font-size: 0.8rem;
+}
+
+.api-result-success {
+  background: #eaf6ea;
+  border: 1px solid #bfe3bf;
+}
+
+.api-result-error {
+  background: #fbeaea;
+  border: 1px solid #eec2c2;
+}
+
 .confirm-button,
 .reject-button {
   padding: 8px 20px;
@@ -473,5 +519,16 @@ tbody tr.selected {
     background: #222;
     border-color: #444;
     color: #eee;
+  }
+  .api-result-success {
+    background: #16281a;
+    border-color: #2c5c34;
+  }
+  .api-result-error {
+    background: #2c1616;
+    border-color: #6b2e2e;
+  }
+  .api-result-matches {
+    border-top-color: rgba(255, 255, 255, 0.15);
   }
 }
