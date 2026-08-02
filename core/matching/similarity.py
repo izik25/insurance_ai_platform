@@ -99,6 +99,58 @@ def _lexically_corroborated(meta: DocumentMeta, other_meta: DocumentMeta) -> boo
     return has_lexical_overlap(bag, other_bag)
 
 
+def rank_candidates_by_company(
+    embeddings_by_doc: dict[str, list[float]],
+    doc_meta: dict[str, DocumentMeta],
+    top_k: int = 3,
+    min_score: float = 0.75,
+) -> dict[str, dict[str, list[tuple[str, float]]]]:
+    """For each document, the top-`top_k` embedding candidates from *each*
+    other company in the same domain, scoring >= `min_score`.
+
+    Feeds `core.matching.semantic_judge`: unlike `find_cross_company_matches`,
+    this does no lexical corroboration at all - it's pure embedding recall,
+    ranked, so the judge gets a shortlist to read rather than a single
+    pre-decided candidate. `top_k` > 1 matters because the *embedding*
+    top-1 for a company is occasionally not the true match (paraphrasing
+    noise); giving the judge the next couple of candidates lets it pick the
+    right one instead of being stuck with a bad #1.
+
+    Returns document_id -> company_id -> [(candidate_id, score), ...],
+    sorted by score descending.
+    """
+    doc_ids = [d for d in embeddings_by_doc if d in doc_meta]
+    if len(doc_ids) < 2:
+        return {}
+
+    matrix = np.array([embeddings_by_doc[d] for d in doc_ids])
+    similarity = matrix @ matrix.T
+
+    result: dict[str, dict[str, list[tuple[str, float]]]] = {}
+    for i, document_id in enumerate(doc_ids):
+        meta = doc_meta[document_id]
+        candidates_by_company: dict[str, list[tuple[str, float]]] = {}
+        for j, other_id in enumerate(doc_ids):
+            if i == j:
+                continue
+            other_meta = doc_meta[other_id]
+            if other_meta.company_id == meta.company_id or other_meta.domain != meta.domain:
+                continue
+            score = float(similarity[i, j])
+            if score < min_score:
+                continue
+            candidates_by_company.setdefault(other_meta.company_id, []).append((other_id, score))
+
+        doc_result = {}
+        for company_id, candidates in candidates_by_company.items():
+            candidates.sort(key=lambda pair: pair[1], reverse=True)
+            doc_result[company_id] = candidates[:top_k]
+        if doc_result:
+            result[document_id] = doc_result
+
+    return result
+
+
 def find_cross_company_matches(
     embeddings_by_doc: dict[str, list[float]],
     doc_meta: dict[str, DocumentMeta],

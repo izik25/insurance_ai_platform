@@ -1,0 +1,150 @@
+PUBLIC API - קריאת נספחים והשוואות בין חברות
+================================================
+
+API ציבורי, ללא אימות (unauthenticated), לקריאה בלבד. מיועד לצד שלישי
+חיצוני שרוצה לשלוף מידע על נספח ביטוח לפי חברה + מספר נספח, ולראות
+לאילו נספחים אצל חברות אחרות הוא הותאם.
+
+Base URL (production):
+    http://191.218.162.211/public/v1
+
+זיהוי: כל בקשה מזוהה לפי company_id (למשל migdal, phoenix, clal,
+menorah, directinsurance) + appendix_number (מספר הנספח כפי שמופיע
+אצל החברה) - לא לפי מזהה פנימי של המערכת.
+
+קידוד: appendix_number יכול להכיל תו "/" בתוכו (למשל "09/2023") - יש
+ל-URL-encode כל segment בנפרד (לא את המחרוזת השלמה כמקשה אחת).
+
+
+1. קריאת מסמך/נספח לפי מספר נספח
+------------------------------------------------
+
+    GET /public/v1/companies/{company_id}/appendices/{appendix_number}
+
+מחזיר את כל השדות שחולצו מהנספח: סוג/שם כיסוי, תנאי זכאות, סכומי
+ביטוח, תקופת אכשרה/המתנה, חריגים, טבלאות ועוד.
+
+דוגמה:
+    curl "http://191.218.162.211/public/v1/companies/migdal/appendices/123"
+
+תגובה - 200 OK:
+{
+  "company_id": "migdal",
+  "appendix_number": ["123"],
+  "appendix_name": "נספח אשפוז כללי",
+  "domain": "health",
+  "pages_count": 4,
+  "has_extraction": true,
+  "coverage_type": "אשפוז",
+  "coverage_name": "כיסוי אשפוז כללי",
+  "eligibility_conditions": "מבוטח פעיל מעל גיל 18",
+  "insurance_amounts": ["500 ש\"ח ליום"],
+  "qualifying_period": "3 חודשים",
+  "waiting_period": "90 יום",
+  "exclusions": ["מצב רפואי קודם שלא הוצהר"],
+  "age_range": "18-65",
+  "restrictions": [],
+  "tables": [
+    { "title": "טבלת תעריפים", "headers": ["גיל", "פרמיה"], "rows": [["18-30", "45"]] }
+  ],
+  "disease_count": null,
+  "disease_list": [],
+  "survival_period": null,
+  "created_date": "2026-01-15T10:00:00Z"
+}
+
+שדות:
+  company_id              string       -
+  appendix_number         string[]     מסמך יכול להכיל כמה מספרי נספח
+  appendix_name           string|null  -
+  domain                  string       health | life | mixed
+  pages_count             int|null     -
+  has_extraction          bool         false = עדיין לא רץ חילוץ LLM, שאר השדות ריקים
+  coverage_type           string|null  -
+  coverage_name           string|null  -
+  eligibility_conditions  string|null  -
+  insurance_amounts       string[]     -
+  qualifying_period       string|null  תקופת אכשרה
+  waiting_period          string|null  תקופת המתנה
+  exclusions              string[]     חריגים
+  age_range               string|null  -
+  restrictions            string[]     -
+  tables                  object[]     { title, headers: string[], rows: string[][] }
+  disease_count           int|null     רלוונטי לנספחי מחלות קשות בלבד
+  disease_list            string[]     רלוונטי לנספחי מחלות קשות בלבד
+  survival_period         string|null  רלוונטי לנספחי מחלות קשות בלבד
+  created_date             ISO datetime -
+
+שגיאות:
+  404 - אין נספח כזה אצל החברה הזו
+        { "detail": "No appendix found for this company/number" }
+
+הורדת הקובץ המקורי (PDF):
+    GET /public/v1/companies/{company_id}/appendices/{appendix_number}/file?download=true
+
+  download=true  -> מוריד כקובץ מצורף
+  בלי הפרמטר     -> נפתח inline בדפדפן
+  שגיאות: 404 אם אין נספח כזה, או אם הקובץ לא קיים על הדיסק
+
+
+2. קריאת השוואות בין נספחים (cross-company matching)
+------------------------------------------------
+
+    GET /public/v1/companies/{company_id}/appendices/{appendix_number}/matches
+
+מחזיר את כל הנספחים אצל חברות אחרות שהמערכת זיהתה כמתארים כיסוי
+דומה לנספח הזה, עם ציון דמיון וסטטוס בדיקה.
+
+פרמטר אופציונלי:
+  status - סינון לפי סטטוס בדיקה: auto_confirmed | pending_review | confirmed | rejected
+
+דוגמה:
+    curl "http://191.218.162.211/public/v1/companies/migdal/appendices/123/matches?status=auto_confirmed"
+
+תגובה - 200 OK:
+[
+  {
+    "company_id": "phoenix",
+    "appendix_number": ["87"],
+    "appendix_name": "כיסוי אשפוז מורחב",
+    "domain": "health",
+    "similarity_score": 0.94,
+    "status": "auto_confirmed"
+  },
+  {
+    "company_id": "clal",
+    "appendix_number": ["45-B"],
+    "appendix_name": "אשפוז כללי",
+    "domain": "health",
+    "similarity_score": 0.91,
+    "status": "pending_review"
+  }
+]
+
+מערך ריק [] - נספח קיים אבל אין לו (עדיין) שום התאמה שתואמת את הסינון.
+
+שדות (כל איבר במערך):
+  company_id        string   החברה של הנספח המותאם (לא המקורי)
+  appendix_number   string[] -
+  appendix_name     string|null -
+  domain            string   health | life | mixed
+  similarity_score  float    0.0-1.0, ציון דמיון בין ה-embeddings
+  status            string   auto_confirmed (>=90% + אימות לקסיקלי)
+                              pending_review (ממתין לבדיקה ידנית)
+                              confirmed / rejected (נבדק ידנית ב-Dashboard)
+
+שגיאות:
+  404 - אין נספח כזה אצל company_id/appendix_number הנתונים
+
+
+נספח: endpoints תומכים
+------------------------------------------------
+
+    GET /public/v1/companies
+
+כל החברות עם מונה נספחים לכל אחת:
+[{ "id": "migdal", "display_name": "מגדל", "appendix_count": 1053 }, ...]
+
+    GET /public/v1/companies/{company_id}/appendices?domain=health
+
+רשימת כל הנספחים של חברה (תקציר בלבד, בלי שדות חילוץ) - domain אופציונלי לסינון.

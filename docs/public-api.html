@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Public API — קריאת נספחים והשוואות בין חברות</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg-panel: #171923;
+    --bg-code: #10131a;
+    --border: #2a2e3a;
+    --text: #e4e6eb;
+    --text-dim: #9aa1b2;
+    --accent: #5b9dff;
+    --accent-2: #7ee0a8;
+    --get: #4caf50;
+    --warn: #f2b84b;
+    --err: #ef6461;
+    --string: #7ee0a8;
+    --key: #5b9dff;
+    --num: #f2b84b;
+    --bool: #d78bff;
+    --null: #8a8f9c;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8;
+      --bg-panel: #ffffff;
+      --bg-code: #f1f2f5;
+      --border: #dfe2e8;
+      --text: #1b1e26;
+      --text-dim: #5b6273;
+      --accent: #1e63d0;
+      --accent-2: #147a4a;
+      --get: #1a7f2e;
+      --warn: #9a6b00;
+      --err: #c22a2a;
+      --string: #147a4a;
+      --key: #1e63d0;
+      --num: #9a6b00;
+      --bool: #8437b5;
+      --null: #6b7280;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1117; --bg-panel: #171923; --bg-code: #10131a; --border: #2a2e3a;
+    --text: #e4e6eb; --text-dim: #9aa1b2; --accent: #5b9dff; --accent-2: #7ee0a8;
+    --get: #4caf50; --warn: #f2b84b; --err: #ef6461;
+    --string: #7ee0a8; --key: #5b9dff; --num: #f2b84b; --bool: #d78bff; --null: #8a8f9c;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f6f8; --bg-panel: #ffffff; --bg-code: #f1f2f5; --border: #dfe2e8;
+    --text: #1b1e26; --text-dim: #5b6273; --accent: #1e63d0; --accent-2: #147a4a;
+    --get: #1a7f2e; --warn: #9a6b00; --err: #c22a2a;
+    --string: #147a4a; --key: #1e63d0; --num: #9a6b00; --bool: #8437b5; --null: #6b7280;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Heebo", Arial, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; }
+    nav.toc { display: none; }
+  }
+
+  nav.toc {
+    border-left: 1px solid var(--border);
+    padding: 28px 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    font-size: 0.9rem;
+  }
+  nav.toc h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+  }
+  nav.toc ul { list-style: none; padding: 0; margin: 0 0 20px; }
+  nav.toc li { margin: 6px 0; }
+  nav.toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    display: block;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  nav.toc a:hover { color: var(--accent); background: var(--bg-panel); }
+
+  main {
+    padding: 40px clamp(20px, 5vw, 64px);
+    max-width: 980px;
+  }
+
+  header.hero {
+    margin-bottom: 36px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  header.hero h1 {
+    font-size: 1.9rem;
+    margin: 0 0 10px;
+  }
+  header.hero p.lead {
+    color: var(--text-dim);
+    font-size: 1.02rem;
+    max-width: 70ch;
+    margin: 0 0 18px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+
+  .base-url {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  .base-url .tag { color: var(--text-dim); font-family: inherit; direction: rtl; }
+
+  section.endpoint {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 26px 28px;
+    margin-bottom: 28px;
+  }
+  section.endpoint > h2 {
+    margin-top: 0;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  section.endpoint > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .route {
+    direction: ltr;
+    unicode-bidi: isolate;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 0.95rem;
+    margin: 14px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .method {
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    letter-spacing: 0.03em;
+  }
+  .method.get { color: var(--get); border: 1px solid var(--get); }
+
+  p.desc { color: var(--text); margin: 12px 0; }
+  p.desc strong.hint { color: var(--text-dim); font-weight: 400; }
+
+  h3.sub {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin: 22px 0 10px;
+  }
+
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 0.88rem;
+    margin: 10px 0;
+  }
+  code { font-family: "Cascadia Code", Consolas, monospace; }
+  code.inline {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.88em;
+    direction: ltr;
+    unicode-bidi: isolate;
+    display: inline-block;
+  }
+
+  .tok-key { color: var(--key); }
+  .tok-str { color: var(--string); }
+  .tok-num { color: var(--num); }
+  .tok-bool { color: var(--bool); }
+  .tok-null { color: var(--null); }
+  .tok-punc { color: var(--text-dim); }
+  .tok-comment { color: var(--text-dim); font-style: italic; }
+
+  table.fields {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 0.92rem;
+  }
+  table.fields th {
+    text-align: right;
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+  }
+  table.fields td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.fields tr:last-child td { border-bottom: none; }
+  table.fields td.field-name {
+    font-family: "Cascadia Code", Consolas, monospace;
+    direction: ltr;
+    unicode-bidi: isolate;
+    text-align: left;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  table.fields td.field-type {
+    color: var(--accent-2);
+    font-family: "Cascadia Code", Consolas, monospace;
+    direction: ltr;
+    unicode-bidi: isolate;
+    white-space: nowrap;
+  }
+  table.fields td.field-note { color: var(--text-dim); }
+
+  .params-list { list-style: none; padding: 0; margin: 10px 0; }
+  .params-list li {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--bg-code);
+  }
+  .params-list code.inline { margin-inline-end: 6px; }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 0.82rem;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .status-pill.s-auto { color: var(--get); border-color: var(--get); }
+  .status-pill.s-pending { color: var(--warn); border-color: var(--warn); }
+  .status-pill.s-reviewed { color: var(--accent); border-color: var(--accent); }
+
+  .error-block {
+    border-inline-start: 3px solid var(--err);
+    background: var(--bg-code);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 10px 0;
+  }
+  .error-block .code {
+    font-family: "Cascadia Code", Consolas, monospace;
+    color: var(--err);
+    font-weight: 700;
+    margin-inline-end: 8px;
+  }
+
+  .note {
+    background: var(--bg-code);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text-dim);
+    font-size: 0.92rem;
+    margin: 10px 0;
+  }
+
+  footer {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 30px 0 10px;
+  }
+</style>
+</head>
+<body>
+
+<nav class="toc">
+  <h2>Endpoints</h2>
+  <ul>
+    <li><a href="#overview">סקירה כללית</a></li>
+    <li><a href="#get-appendix">1. קריאת נספח</a></li>
+    <li><a href="#download-file">הורדת PDF</a></li>
+    <li><a href="#get-matches">2. השוואות בין נספחים</a></li>
+    <li><a href="#appendix-endpoints">נספח: endpoints תומכים</a></li>
+  </ul>
+  <h2>קישורים</h2>
+  <ul>
+    <li><a href="#errors-note">קודי שגיאה</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <header class="hero" id="overview">
+    <div class="badge-row">
+      <span class="badge">🌐 Public</span>
+      <span class="badge">🔓 No Auth</span>
+      <span class="badge">📖 Read-only</span>
+    </div>
+    <h1>Public API — קריאת נספחים והשוואות בין חברות</h1>
+    <p class="lead">
+      API ציבורי, ללא אימות (unauthenticated), לקריאה בלבד. מיועד לצד שלישי חיצוני
+      שרוצה לשלוף מידע על נספח ביטוח לפי חברה + מספר נספח, ולראות לאילו נספחים
+      אצל חברות אחרות הוא הותאם.
+    </p>
+
+    <div class="base-url">
+      <span class="tag">Base URL (production):</span>
+      <code>http://191.218.162.211/public/v1</code>
+    </div>
+
+    <div class="note" style="margin-top:18px;">
+      <strong>זיהוי:</strong> כל בקשה מזוהה לפי <code class="inline">company_id</code>
+      (למשל <code class="inline">migdal</code>, <code class="inline">phoenix</code>,
+      <code class="inline">clal</code>, <code class="inline">menorah</code>,
+      <code class="inline">directinsurance</code>) + <code class="inline">appendix_number</code>
+      (מספר הנספח כפי שמופיע אצל החברה) — <strong>לא</strong> לפי מזהה פנימי של המערכת.
+      <br><br>
+      <strong>קידוד:</strong> <code class="inline">appendix_number</code> יכול להכיל תו
+      "<code class="inline">/</code>" בתוכו (למשל <code class="inline">"09/2023"</code>) —
+      יש ל-URL-encode כל segment בנפרד (לא את המחרוזת השלמה כמקשה אחת).
+    </div>
+  </header>
+
+  <!-- 1. GET appendix -->
+  <section class="endpoint" id="get-appendix">
+    <h2><span class="num">1.</span> קריאת מסמך/נספח לפי מספר נספח</h2>
+
+    <div class="route">
+      <span class="method get">GET</span>
+      <span>/public/v1/companies/{company_id}/appendices/{appendix_number}</span>
+    </div>
+
+    <p class="desc">
+      מחזיר את כל השדות שחולצו מהנספח: סוג/שם כיסוי, תנאי זכאות, סכומי ביטוח,
+      תקופת אכשרה/המתנה, חריגים, טבלאות ועוד.
+    </p>
+
+    <h3 class="sub">דוגמה</h3>
+    <pre><code><span class="tok-comment"># curl</span>
+curl <span class="tok-str">"http://191.218.162.211/public/v1/companies/migdal/appendices/123"</span></code></pre>
+
+    <h3 class="sub">תגובה — 200 OK</h3>
+    <pre><code>{
+  <span class="tok-key">"company_id"</span><span class="tok-punc">:</span> <span class="tok-str">"migdal"</span>,
+  <span class="tok-key">"appendix_number"</span><span class="tok-punc">:</span> [<span class="tok-str">"123"</span>],
+  <span class="tok-key">"appendix_name"</span><span class="tok-punc">:</span> <span class="tok-str">"נספח אשפוז כללי"</span>,
+  <span class="tok-key">"domain"</span><span class="tok-punc">:</span> <span class="tok-str">"health"</span>,
+  <span class="tok-key">"pages_count"</span><span class="tok-punc">:</span> <span class="tok-num">4</span>,
+  <span class="tok-key">"has_extraction"</span><span class="tok-punc">:</span> <span class="tok-bool">true</span>,
+  <span class="tok-key">"coverage_type"</span><span class="tok-punc">:</span> <span class="tok-str">"אשפוז"</span>,
+  <span class="tok-key">"coverage_name"</span><span class="tok-punc">:</span> <span class="tok-str">"כיסוי אשפוז כללי"</span>,
+  <span class="tok-key">"eligibility_conditions"</span><span class="tok-punc">:</span> <span class="tok-str">"מבוטח פעיל מעל גיל 18"</span>,
+  <span class="tok-key">"insurance_amounts"</span><span class="tok-punc">:</span> [<span class="tok-str">"500 ש\"ח ליום"</span>],
+  <span class="tok-key">"qualifying_period"</span><span class="tok-punc">:</span> <span class="tok-str">"3 חודשים"</span>,
+  <span class="tok-key">"waiting_period"</span><span class="tok-punc">:</span> <span class="tok-str">"90 יום"</span>,
+  <span class="tok-key">"exclusions"</span><span class="tok-punc">:</span> [<span class="tok-str">"מצב רפואי קודם שלא הוצהר"</span>],
+  <span class="tok-key">"age_range"</span><span class="tok-punc">:</span> <span class="tok-str">"18-65"</span>,
+  <span class="tok-key">"restrictions"</span><span class="tok-punc">:</span> [],
+  <span class="tok-key">"tables"</span><span class="tok-punc">:</span> [
+    { <span class="tok-key">"title"</span><span class="tok-punc">:</span> <span class="tok-str">"טבלת תעריפים"</span>, <span class="tok-key">"headers"</span><span class="tok-punc">:</span> [<span class="tok-str">"גיל"</span>, <span class="tok-str">"פרמיה"</span>], <span class="tok-key">"rows"</span><span class="tok-punc">:</span> [[<span class="tok-str">"18-30"</span>, <span class="tok-str">"45"</span>]] }
+  ],
+  <span class="tok-key">"disease_count"</span><span class="tok-punc">:</span> <span class="tok-null">null</span>,
+  <span class="tok-key">"disease_list"</span><span class="tok-punc">:</span> [],
+  <span class="tok-key">"survival_period"</span><span class="tok-punc">:</span> <span class="tok-null">null</span>,
+  <span class="tok-key">"created_date"</span><span class="tok-punc">:</span> <span class="tok-str">"2026-01-15T10:00:00Z"</span>
+}</code></pre>
+
+    <h3 class="sub">שדות</h3>
+    <table class="fields">
+      <thead><tr><th>שדה</th><th>טיפוס</th><th>הערה</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">company_id</td><td class="field-type">string</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">appendix_number</td><td class="field-type">string[]</td><td class="field-note">מסמך יכול להכיל כמה מספרי נספח</td></tr>
+        <tr><td class="field-name">appendix_name</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">domain</td><td class="field-type">string</td><td class="field-note">health | life | mixed</td></tr>
+        <tr><td class="field-name">pages_count</td><td class="field-type">int | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">has_extraction</td><td class="field-type">bool</td><td class="field-note">false = עדיין לא רץ חילוץ LLM, שאר השדות ריקים</td></tr>
+        <tr><td class="field-name">coverage_type</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">coverage_name</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">eligibility_conditions</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">insurance_amounts</td><td class="field-type">string[]</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">qualifying_period</td><td class="field-type">string | null</td><td class="field-note">תקופת אכשרה</td></tr>
+        <tr><td class="field-name">waiting_period</td><td class="field-type">string | null</td><td class="field-note">תקופת המתנה</td></tr>
+        <tr><td class="field-name">exclusions</td><td class="field-type">string[]</td><td class="field-note">חריגים</td></tr>
+        <tr><td class="field-name">age_range</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">restrictions</td><td class="field-type">string[]</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">tables</td><td class="field-type">object[]</td><td class="field-note">{ title, headers: string[], rows: string[][] }</td></tr>
+        <tr><td class="field-name">disease_count</td><td class="field-type">int | null</td><td class="field-note">רלוונטי לנספחי מחלות קשות בלבד</td></tr>
+        <tr><td class="field-name">disease_list</td><td class="field-type">string[]</td><td class="field-note">רלוונטי לנספחי מחלות קשות בלבד</td></tr>
+        <tr><td class="field-name">survival_period</td><td class="field-type">string | null</td><td class="field-note">רלוונטי לנספחי מחלות קשות בלבד</td></tr>
+        <tr><td class="field-name">created_date</td><td class="field-type">ISO datetime</td><td class="field-note">—</td></tr>
+      </tbody>
+    </table>
+
+    <h3 class="sub" id="errors-note">שגיאות</h3>
+    <div class="error-block">
+      <span class="code">404</span> אין נספח כזה אצל החברה הזו
+      <pre style="margin-top:8px;"><code>{ <span class="tok-key">"detail"</span><span class="tok-punc">:</span> <span class="tok-str">"No appendix found for this company/number"</span> }</code></pre>
+    </div>
+
+    <h3 class="sub" id="download-file">הורדת הקובץ המקורי (PDF)</h3>
+    <div class="route">
+      <span class="method get">GET</span>
+      <span>/public/v1/companies/{company_id}/appendices/{appendix_number}/file?download=true</span>
+    </div>
+    <ul class="params-list">
+      <li><code class="inline">download=true</code> → מוריד כקובץ מצורף</li>
+      <li>בלי הפרמטר → נפתח inline בדפדפן</li>
+      <li>שגיאות: 404 אם אין נספח כזה, או אם הקובץ לא קיים על הדיסק</li>
+    </ul>
+  </section>
+
+  <!-- 2. GET matches -->
+  <section class="endpoint" id="get-matches">
+    <h2><span class="num">2.</span> קריאת השוואות בין נספחים (cross-company matching)</h2>
+
+    <div class="route">
+      <span class="method get">GET</span>
+      <span>/public/v1/companies/{company_id}/appendices/{appendix_number}/matches</span>
+    </div>
+
+    <p class="desc">
+      מחזיר את כל הנספחים אצל חברות אחרות שהמערכת זיהתה כמתארים כיסוי דומה
+      לנספח הזה, עם ציון דמיון וסטטוס בדיקה.
+    </p>
+
+    <h3 class="sub">פרמטר אופציונלי</h3>
+    <ul class="params-list">
+      <li>
+        <code class="inline">status</code>
+        סינון לפי סטטוס בדיקה:
+        <span class="status-pill s-auto">auto_confirmed</span>
+        <span class="status-pill s-pending">pending_review</span>
+        <span class="status-pill s-reviewed">confirmed</span>
+        <span class="status-pill">rejected</span>
+      </li>
+    </ul>
+
+    <h3 class="sub">דוגמה</h3>
+    <pre><code><span class="tok-comment"># curl</span>
+curl <span class="tok-str">"http://191.218.162.211/public/v1/companies/migdal/appendices/123/matches?status=auto_confirmed"</span></code></pre>
+
+    <h3 class="sub">תגובה — 200 OK</h3>
+    <pre><code>[
+  {
+    <span class="tok-key">"company_id"</span><span class="tok-punc">:</span> <span class="tok-str">"phoenix"</span>,
+    <span class="tok-key">"appendix_number"</span><span class="tok-punc">:</span> [<span class="tok-str">"87"</span>],
+    <span class="tok-key">"appendix_name"</span><span class="tok-punc">:</span> <span class="tok-str">"כיסוי אשפוז מורחב"</span>,
+    <span class="tok-key">"domain"</span><span class="tok-punc">:</span> <span class="tok-str">"health"</span>,
+    <span class="tok-key">"similarity_score"</span><span class="tok-punc">:</span> <span class="tok-num">0.94</span>,
+    <span class="tok-key">"status"</span><span class="tok-punc">:</span> <span class="tok-str">"auto_confirmed"</span>
+  },
+  {
+    <span class="tok-key">"company_id"</span><span class="tok-punc">:</span> <span class="tok-str">"clal"</span>,
+    <span class="tok-key">"appendix_number"</span><span class="tok-punc">:</span> [<span class="tok-str">"45-B"</span>],
+    <span class="tok-key">"appendix_name"</span><span class="tok-punc">:</span> <span class="tok-str">"אשפוז כללי"</span>,
+    <span class="tok-key">"domain"</span><span class="tok-punc">:</span> <span class="tok-str">"health"</span>,
+    <span class="tok-key">"similarity_score"</span><span class="tok-punc">:</span> <span class="tok-num">0.91</span>,
+    <span class="tok-key">"status"</span><span class="tok-punc">:</span> <span class="tok-str">"pending_review"</span>
+  }
+]</code></pre>
+
+    <div class="note">מערך ריק <code class="inline">[]</code> — נספח קיים אבל אין לו (עדיין) שום התאמה שתואמת את הסינון.</div>
+
+    <h3 class="sub">שדות (כל איבר במערך)</h3>
+    <table class="fields">
+      <thead><tr><th>שדה</th><th>טיפוס</th><th>הערה</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">company_id</td><td class="field-type">string</td><td class="field-note">החברה של הנספח המותאם (לא המקורי)</td></tr>
+        <tr><td class="field-name">appendix_number</td><td class="field-type">string[]</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">appendix_name</td><td class="field-type">string | null</td><td class="field-note">—</td></tr>
+        <tr><td class="field-name">domain</td><td class="field-type">string</td><td class="field-note">health | life | mixed</td></tr>
+        <tr><td class="field-name">similarity_score</td><td class="field-type">float</td><td class="field-note">0.0–1.0, ציון דמיון בין ה-embeddings</td></tr>
+        <tr>
+          <td class="field-name">status</td>
+          <td class="field-type">string</td>
+          <td class="field-note">
+            <span class="status-pill s-auto">auto_confirmed</span> ≥90% + אימות לקסיקלי&nbsp;·&nbsp;
+            <span class="status-pill s-pending">pending_review</span> ממתין לבדיקה ידנית&nbsp;·&nbsp;
+            <span class="status-pill s-reviewed">confirmed / rejected</span> נבדק ידנית ב-Dashboard
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="sub">שגיאות</h3>
+    <div class="error-block">
+      <span class="code">404</span> אין נספח כזה אצל company_id/appendix_number הנתונים
+    </div>
+  </section>
+
+  <!-- Appendix: supporting endpoints -->
+  <section class="endpoint" id="appendix-endpoints">
+    <h2>נספח: endpoints תומכים</h2>
+
+    <div class="route">
+      <span class="method get">GET</span>
+      <span>/public/v1/companies</span>
+    </div>
+    <p class="desc">כל החברות עם מונה נספחים לכל אחת:</p>
+    <pre><code>[
+  { <span class="tok-key">"id"</span><span class="tok-punc">:</span> <span class="tok-str">"migdal"</span>, <span class="tok-key">"display_name"</span><span class="tok-punc">:</span> <span class="tok-str">"מגדל"</span>, <span class="tok-key">"appendix_count"</span><span class="tok-punc">:</span> <span class="tok-num">1053</span> },
+  <span class="tok-comment">// ...</span>
+]</code></pre>
+
+    <div class="route" style="margin-top:22px;">
+      <span class="method get">GET</span>
+      <span>/public/v1/companies/{company_id}/appendices?domain=health</span>
+    </div>
+    <p class="desc">
+      רשימת כל הנספחים של חברה (תקציר בלבד, בלי שדות חילוץ) —
+      <code class="inline">domain</code> אופציונלי לסינון.
+    </p>
+  </section>
+
+  <footer>
+    Public API Reference · generated from <code class="inline">docs/public-api.txt</code>
+  </footer>
+
+</main>
+
+</body>
+</html>

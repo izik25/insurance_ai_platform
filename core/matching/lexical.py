@@ -39,6 +39,15 @@ _GENERIC_INSURANCE_TERMS = {
     "ביטוח", "חיים", "בריאות", "פוליסה", "נספח", "גילוי", "נאות", "תנאים",
     "כלליים", "מקרה", "כיסוי", "כתב", "שירות", "תכנית", "תוכנית", "מוצר",
     "מהדורה", "עדכון", "מעודכן", "נוסח", "פרטי", "כללי", "נוסף", "מחלות",
+    # "מוות"/"מות": as generic within the life domain as "ביטוח"/"חיים" -
+    # almost every life-insurance appendix mentions death benefit somewhere,
+    # so sharing just this word carries no signal about *which* coverage two
+    # documents describe (confirmed live: Hachshara's נספח 1170, a narrow
+    # accelerated-payment-for-terminal-illness rider, was "corroborated"
+    # against ~150 unrelated life documents - tiered death-benefit riders
+    # ("רמה 1/5/10/12"), pension death cover, monthly-family-income riders -
+    # whose only shared word with it was "מוות").
+    "מוות", "מות",
 }
 _PREFIX_LETTERS = ("ו", "ב", "כ", "ל", "מ", "ש", "ה")
 

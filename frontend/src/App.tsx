@@ -17,11 +17,174 @@ import {
 } from "./api";
 import { overallScore, scoreComparison } from "./scoring";
 
-function StatCard({ label, value }: { label: string; value: number | string }) {
+function StatCard({
+  label,
+  value,
+  onClick,
+  active,
+}: {
+  label: string;
+  value: number | string;
+  onClick?: () => void;
+  active?: boolean;
+}) {
   return (
-    <div className="stat-card">
+    <div
+      className={
+        "stat-card" +
+        (onClick ? " stat-card-clickable" : "") +
+        (active ? " stat-card-active" : "")
+      }
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="stat-value">{value}</div>
       <div className="stat-label">{label}</div>
+    </div>
+  );
+}
+
+interface DocumentFilters {
+  company: string;
+  domain: string;
+  search: string;
+  extraction: "all" | "done" | "pending";
+  embedding: "all" | "done" | "pending";
+}
+
+const EMPTY_FILTERS: DocumentFilters = {
+  company: "",
+  domain: "",
+  search: "",
+  extraction: "all",
+  embedding: "all",
+};
+
+function documentMatchesFilters(d: DocumentOut, filters: DocumentFilters): boolean {
+  if (filters.company && d.company_id !== filters.company) return false;
+  if (filters.domain && d.domain !== filters.domain) return false;
+  if (filters.extraction === "done" && !d.has_extraction) return false;
+  if (filters.extraction === "pending" && d.has_extraction) return false;
+  if (filters.embedding === "done" && !d.has_embedding) return false;
+  if (filters.embedding === "pending" && d.has_embedding) return false;
+  const term = filters.search.trim().toLowerCase();
+  if (term) {
+    const inFileName = d.original_file_name.toLowerCase().includes(term);
+    const inAppendixName = (d.appendix_name ?? "").toLowerCase().includes(term);
+    const inAppendixNumber = d.appendix_number.some((n) => n.toLowerCase().includes(term));
+    if (!inFileName && !inAppendixName && !inAppendixNumber) return false;
+  }
+  return true;
+}
+
+function FilterBar({
+  filters,
+  onChange,
+  companies,
+  domains,
+  resultCount,
+  totalCount,
+}: {
+  filters: DocumentFilters;
+  onChange: (next: DocumentFilters) => void;
+  companies: string[];
+  domains: string[];
+  resultCount: number;
+  totalCount: number;
+}) {
+  const hasActiveFilters =
+    Boolean(filters.company) ||
+    Boolean(filters.domain) ||
+    Boolean(filters.search) ||
+    filters.extraction !== "all" ||
+    filters.embedding !== "all";
+
+  return (
+    <div className="filter-bar">
+      <div className="filter-field">
+        <label>חברה</label>
+        <select
+          value={filters.company}
+          onChange={(e) => onChange({ ...filters, company: e.target.value })}
+        >
+          <option value="">כל החברות</option>
+          {companies.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="filter-field">
+        <label>תחום</label>
+        <select
+          value={filters.domain}
+          onChange={(e) => onChange({ ...filters, domain: e.target.value })}
+        >
+          <option value="">כל התחומים</option>
+          {domains.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="filter-field filter-field-search">
+        <label>חיפוש</label>
+        <input
+          type="text"
+          placeholder="שם קובץ, מספר נספח או שם נספח..."
+          value={filters.search}
+          onChange={(e) => onChange({ ...filters, search: e.target.value })}
+        />
+      </div>
+      <div className="filter-field">
+        <label>חילוץ שדות</label>
+        <select
+          value={filters.extraction}
+          onChange={(e) =>
+            onChange({ ...filters, extraction: e.target.value as DocumentFilters["extraction"] })
+          }
+        >
+          <option value="all">הכל</option>
+          <option value="done">בוצע</option>
+          <option value="pending">טרם בוצע</option>
+        </select>
+      </div>
+      <div className="filter-field">
+        <label>Embedding</label>
+        <select
+          value={filters.embedding}
+          onChange={(e) =>
+            onChange({ ...filters, embedding: e.target.value as DocumentFilters["embedding"] })
+          }
+        >
+          <option value="all">הכל</option>
+          <option value="done">בוצע</option>
+          <option value="pending">טרם בוצע</option>
+        </select>
+      </div>
+      <div className="filter-field filter-field-actions">
+        <span className="muted small">
+          {resultCount} מתוך {totalCount} מסמכים
+        </span>
+        {hasActiveFilters && (
+          <button className="clear-filters-button" onClick={() => onChange(EMPTY_FILTERS)}>
+            נקה סינון
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1194,6 +1357,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewingMatch, setReviewingMatch] = useState<MatchOut | null>(null);
+  const [filters, setFilters] = useState<DocumentFilters>(EMPTY_FILTERS);
   const [multiComparison, setMultiComparison] = useState<{
     documentAId: string;
     matches: MatchOut[];
@@ -1242,6 +1406,19 @@ function App() {
     };
   }, [documents]);
 
+  const domains = useMemo(
+    () =>
+      Array.from(new Set(documents.map((d) => d.domain)))
+        .filter(Boolean)
+        .sort(),
+    [documents]
+  );
+
+  const filteredDocuments = useMemo(
+    () => documents.filter((d) => documentMatchesFilters(d, filters)),
+    [documents, filters]
+  );
+
   return (
     <div className="app" dir="rtl">
       <header className="app-header">
@@ -1268,13 +1445,36 @@ function App() {
             <StatCard label="התאמות מאושרות" value={autoConfirmed.length} />
             <StatCard label="ממתינות לבדיקה" value={pendingReview.length} />
             {[...stats.byCompany.entries()].map(([company, count]) => (
-              <StatCard key={company} label={company} value={count} />
+              <StatCard
+                key={company}
+                label={company}
+                value={count}
+                active={filters.company === company}
+                onClick={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    company: prev.company === company ? "" : company,
+                  }))
+                }
+              />
             ))}
           </section>
 
           <section>
             <h2>מסמכים שהורדו</h2>
-            <DocumentsTable documents={documents} onSelect={setSelectedId} selectedId={selectedId} />
+            <FilterBar
+              filters={filters}
+              onChange={setFilters}
+              companies={[...stats.byCompany.keys()].sort()}
+              domains={domains}
+              resultCount={filteredDocuments.length}
+              totalCount={documents.length}
+            />
+            <DocumentsTable
+              documents={filteredDocuments}
+              onSelect={setSelectedId}
+              selectedId={selectedId}
+            />
           </section>
 
           <section>
