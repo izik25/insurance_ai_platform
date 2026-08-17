@@ -7,11 +7,17 @@ work end to end (see downloader.py for the full data-flow explanation).
 `DOMAIN_TO_PRODUCT` maps this platform's domain to 555.co.il's numeric
 `product` id, discovered live via `GET /webapp/api/siteapi/form/formdata`
 (product 7 = "ביטוח חיים"/life, product 8 = "ביטוח בריאות"/health, product
-9 = "תאונות אישיות"). Unlike Menorah's `salesGroup` sub-categories (and
-their valid form types), which are fetched dynamically from that same
-`formdata` endpoint rather than hardcoded here - the site already exposes
-that taxonomy as data, so duplicating it as a hardcoded table would only
-risk going stale.
+9 = "תאונות אישיות"/personal accidents - folded into health, same
+convention Harel/Migdal use for their own personal-accidents category;
+confirmed live 2026-08-13 this product exists with ~70 documents of its
+own and was simply never wired up here despite being named in this
+docstring from the start - a plain omission, not a scope decision. Product
+10, "תוכניות חסכון"/savings plans, stays excluded, consistent with every
+other company plugin only tracking health/life). Unlike Menorah's
+`salesGroup` sub-categories (and their valid form types), which are
+fetched dynamically from that same `formdata` endpoint rather than
+hardcoded here - the site already exposes that taxonomy as data, so
+duplicating it as a hardcoded table would only risk going stale.
 
 Per explicit user decision, ALL form types available for a given
 salesGroup are queried (not just "פוליסה וכתבי שירות"/policy) - live
@@ -35,9 +41,9 @@ from pydantic import Field
 
 from core.plugins.base import CompanyConfig
 
-DOMAIN_TO_PRODUCT: dict[str, str] = {
-    "life": "7",
-    "health": "8",
+DOMAIN_TO_PRODUCT: dict[str, list[str]] = {
+    "life": ["7"],
+    "health": ["8", "9"],
 }
 
 

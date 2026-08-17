@@ -4,12 +4,18 @@ HTTP transport."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import httpx
 
 from companies.aig.config import AigConfig
-from companies.aig.downloader import AigDocumentRef, AigDownloader, refs_from_page_html
+from companies.aig.downloader import (
+    AigDocumentRef,
+    AigDownloader,
+    marketing_dates_from_title,
+    refs_from_page_html,
+)
 
 
 def _make_config(**overrides: object) -> AigConfig:
@@ -236,3 +242,45 @@ def test_download_all_does_not_retry_permanent_404(tmp_path: Path) -> None:
 
     assert attempts["count"] == 1
     assert saved == []
+
+
+def test_marketing_dates_from_title_start_only_month_year() -> None:
+    start, end = marketing_dates_from_title("פוליסת בריאות בסיסית בתוקף החל מ 02.2024")
+    assert start == date(2024, 2, 1)
+    assert end is None
+
+
+def test_marketing_dates_from_title_start_only_full_date() -> None:
+    start, end = marketing_dates_from_title(
+        "Extra Care ביטוח למחלות קשות בתוקף החל מ 01.08.2023"
+    )
+    assert start == date(2023, 8, 1)
+    assert end is None
+
+
+def test_marketing_dates_from_title_start_and_end() -> None:
+    start, end = marketing_dates_from_title(
+        "פוליסת בריאות בסיסית בתוקף החל מ- 09.2023 ועד ל- 31.01.2024"
+    )
+    assert start == date(2023, 9, 1)
+    assert end == date(2024, 1, 31)
+
+
+def test_marketing_dates_from_title_scrambled_word_order() -> None:
+    start, _ = marketing_dates_from_title(
+        "מהשקל הראשון בתוקף החל מ-01.10.2017 AIG Medicare פוליסת"
+    )
+    assert start == date(2017, 10, 1)
+
+
+def test_marketing_dates_from_title_hebrew_month_name_not_parsed() -> None:
+    """Known, accepted gap - see module docstring."""
+    start, end = marketing_dates_from_title("בתוקף מאוקטובר 17")
+    assert start is None
+    assert end is None
+
+
+def test_marketing_dates_from_title_no_date_at_all() -> None:
+    start, end = marketing_dates_from_title("טופס הוראת קבע")
+    assert start is None
+    assert end is None

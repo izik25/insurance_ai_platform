@@ -24,6 +24,16 @@ each (see MenorahConfig.listing_delay_seconds), never in parallel or back
 to back. PDF downloads from the separate `cdn.menoramivt.co.il` host are
 NOT behind this protection - plain HTTP with a normal User-Agent works
 fine (confirmed live).
+
+Each result also carries `policyIssueDate`/`policyEndDate` (ISO datetimes)
+- confirmed live (2026-08-11) as a genuine validity window, same role as
+Clal's StartValidity/EndValidity: the same policyHeader appears repeatedly
+across results with different, real past end dates for superseded
+versions. Currently-active documents use a far-future sentinel end date
+rather than a null/unset marker - `"2100-12-01T13:00:00.000Z"` observed
+consistently (51/333 documents in a live sample, always that exact
+value) - treated as "no real end date" the same way Clal treats its
+`"0001-01-01"` unset sentinel, just at the other end of time.
 """
 
 from __future__ import annotations
@@ -31,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -63,6 +74,14 @@ class MenorahDocumentRef:
     title: str
     appendix_numbers: list[str]  # a document can legitimately cover more than one
     download_url: str
+    marketing_start_date: date | None = None  # "policyIssueDate"
+    marketing_end_date: date | None = None  # "policyEndDate" - far-future sentinel == active
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
@@ -78,6 +97,25 @@ class MenorahDocumentRef:
         digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
         keep = _MAX_FILENAME_LENGTH - len(ext) - len(digest) - 1
         return f"{stem[:keep]}_{digest}{ext}"
+
+
+_FAR_FUTURE_SENTINEL_YEAR = 2090
+
+
+def _parse_date(text: str | None) -> date | None:
+    """Parse the API's ISO datetime strings; missing/far-future-sentinel/
+    unparseable -> None (None is the expected, meaningful case for
+    policyEndDate: far-future == active)."""
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        logger.warning("Menorah: unparseable date %r", text)
+        return None
+    if parsed.year >= _FAR_FUTURE_SENTINEL_YEAR:
+        return None
+    return parsed
 
 
 def refs_from_search_response(domain: str, body: dict[str, Any]) -> list[MenorahDocumentRef]:
@@ -103,6 +141,8 @@ def refs_from_search_response(domain: str, body: dict[str, Any]) -> list[Menorah
                 title=title,
                 appendix_numbers=find_appendix_numbers(haystack),
                 download_url=url,
+                marketing_start_date=_parse_date(policy.get("policyIssueDate")),
+                marketing_end_date=_parse_date(policy.get("policyEndDate")),
             )
         )
     return refs

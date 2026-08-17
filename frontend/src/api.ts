@@ -16,7 +16,69 @@ export interface DocumentOut {
   extraction_method: string;
   has_extraction: boolean;
   has_embedding: boolean;
+  marketing_start_date: string | null;
+  marketing_end_date: string | null;
+  is_active: boolean;
+  category_id: string | null;
+  main_category: string | null;
+  coverage_family: string | null;
+  coverage_subtype: string | null;
   created_date: string;
+}
+
+export interface ClassificationOut {
+  category_id: string;
+  main_category: string;
+  coverage_family: string;
+  coverage_subtype: string | null;
+  coverage_variant: string | null;
+  benefit_model: string | null;
+  target_population: string | null;
+  confidence: number | null;
+  evidence: string | null;
+}
+
+export interface CanonicalProfileOut {
+  insured_event: string | null;
+  covered_events: string[];
+  covered_conditions: string[];
+  exclusions_normalized: string[];
+  limitations: string[];
+  eligibility_normalized: string | null;
+  waiting_period_text: string | null;
+  qualifying_period_text: string | null;
+  survival_period_text: string | null;
+  benefit_type: string | null;
+  benefit_calculation: string | null;
+  amounts: string[];
+  caps: string[];
+  additional_findings_summary: string | null;
+}
+
+export interface FingerprintOut {
+  waiting_period_days: number | null;
+  qualifying_period_days: number | null;
+  survival_period_days: number | null;
+  min_entry_age: number | null;
+  max_entry_age: number | null;
+  termination_age: number | null;
+  benefit_type: string | null;
+  benefit_amount_min: number | null;
+  benefit_amount_max: number | null;
+  benefit_amount_currency: string | null;
+  benefit_percentage: number | null;
+  maximum_benefit: number | null;
+  deductible_amount: number | null;
+  covered_event_count: number;
+  major_exclusion_count: number;
+  special_condition_count: number;
+}
+
+export interface DocumentAnalysisOut {
+  document_id: string;
+  classification: ClassificationOut | null;
+  canonical_profile: CanonicalProfileOut | null;
+  fingerprint: FingerprintOut | null;
 }
 
 export interface PolicyTableOut {
@@ -66,6 +128,16 @@ export interface MatchOut {
 export async function fetchDocuments(): Promise<DocumentOut[]> {
   const response = await fetch(`${API_BASE}/documents`);
   if (!response.ok) throw new Error(`Failed to load documents: ${response.status}`);
+  return response.json();
+}
+
+export async function fetchAnalysis(documentId: string): Promise<DocumentAnalysisOut | null> {
+  // Same {..:path} encoding as fetchExtraction/getDocumentFileUrl - document
+  // ids contain literal "/".
+  const encodedPath = documentId.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(`${API_BASE}/documents/${encodedPath}/analysis`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Failed to load analysis: ${response.status}`);
   return response.json();
 }
 

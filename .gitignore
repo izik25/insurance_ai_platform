@@ -14,9 +14,11 @@ htmlcov/
 data/raw_documents/*
 data/processed/*
 data/json_dictionary/*
+data/exports/*
 !data/raw_documents/.gitkeep
 !data/processed/.gitkeep
 !data/json_dictionary/.gitkeep
+!data/exports/.gitkeep
 
 # Tesseract language data — large binaries, fetched by tessdata/README.md
 tessdata/*.traineddata

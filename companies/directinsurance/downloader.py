@@ -51,6 +51,18 @@ defensively but is expected to return [] for most/all documents here;
 that's fine, per the project's "trust the source, else backfill via LLM"
 rule.
 
+Each result also carries `fromDate`/`toDate` (DD/MM/YYYY strings) -
+confirmed live (2026-08-10) as a genuine validity window, the same role as
+Harel's marketing_start_date/marketing_end_date: `toDate` blank means still
+current, a real date means superseded. Known gap (documented, not solved,
+same as AIG's title-parsing gap): a minority of documents (~15% of
+blank-`toDate` rows in a live sample) are blank yet demonstrably no longer
+sold - confirmed by cross-checking against the `active: "true"` query
+variant (a strict subset of `active: "false"`, which this plugin always
+queries for max coverage). That per-form active flag isn't captured here
+to avoid doubling every request; a blank `toDate` is treated as active,
+same tradeoff already accepted for AIG.
+
 Domain is taken directly from which product a salesGroup belongs to (see
 `config.DOMAIN_TO_PRODUCT`) - including the two salesGroups nested under
 the life page's product that are content-wise health-adjacent
@@ -62,6 +74,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,12 +107,35 @@ class DirectInsuranceDocumentRef:
     sale_group: str  # saleDsc, e.g. "מקרה מוות"
     appendix_numbers: list[str]
     download_url: str
+    marketing_start_date: date | None = None  # "fromDate"
+    marketing_end_date: date | None = None  # "toDate" - blank on-site == still active
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
         """formId is unique per document, so it alone is a safe filename -
         no collisions, no length concerns (unlike title-derived filenames)."""
         return f"{self.form_id}.pdf"
+
+
+def _parse_date(text: str | None) -> date | None:
+    """Parse the API's "DD/MM/YYYY" date strings; blank/unparseable -> None
+    (blank is the expected, meaningful case for toDate: no end == active)."""
+    if not text:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%d/%m/%Y").date()
+    except ValueError:
+        logger.warning("Direct Insurance: unparseable date %r", text)
+        return None
 
 
 def refs_from_search_response(
@@ -131,6 +167,8 @@ def refs_from_search_response(
                 sale_group=item.get("saleDsc") or "",
                 appendix_numbers=find_appendix_numbers(title),
                 download_url=config.download_url_template.format(form_id=form_id),
+                marketing_start_date=_parse_date(item.get("fromDate")),
+                marketing_end_date=_parse_date(item.get("toDate")),
             )
         )
     return refs
@@ -161,26 +199,27 @@ class DirectInsuranceDownloader(BaseDownloader):
         refs: list[DirectInsuranceDocumentRef] = []
         seen_form_ids: set[int] = set()
 
-        for domain, product_id in DOMAIN_TO_PRODUCT.items():
-            for sale_group in sale_groups_by_product.get(product_id, []):
-                sale_group_id = sale_group["key"]
-                form_types = [t["key"] for t in form_types_active.get(sale_group_id, [])]
-                if not form_types:
-                    logger.warning(
-                        "Direct Insurance %s saleGroup=%s (%s): no valid form types, skipping",
-                        domain,
-                        sale_group_id,
-                        sale_group.get("dsc"),
-                    )
-                    continue
+        for domain, product_ids in DOMAIN_TO_PRODUCT.items():
+            for product_id in product_ids:
+                for sale_group in sale_groups_by_product.get(product_id, []):
+                    sale_group_id = sale_group["key"]
+                    form_types = [t["key"] for t in form_types_active.get(sale_group_id, [])]
+                    if not form_types:
+                        logger.warning(
+                            "Direct Insurance %s saleGroup=%s (%s): no valid form types, skipping",
+                            domain,
+                            sale_group_id,
+                            sale_group.get("dsc"),
+                        )
+                        continue
 
-                for ref in self._search(domain, product_id, sale_group_id, form_types):
-                    if ref.form_id not in seen_form_ids:
-                        seen_form_ids.add(ref.form_id)
-                        refs.append(ref)
+                    for ref in self._search(domain, product_id, sale_group_id, form_types):
+                        if ref.form_id not in seen_form_ids:
+                            seen_form_ids.add(ref.form_id)
+                            refs.append(ref)
 
-                if self._config.listing_delay_seconds:
-                    time.sleep(self._config.listing_delay_seconds)
+                    if self._config.listing_delay_seconds:
+                        time.sleep(self._config.listing_delay_seconds)
 
         logger.info("Direct Insurance archive: %d documents found", len(refs))
         return refs

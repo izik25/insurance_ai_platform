@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.matching.similarity import DocumentMeta, find_cross_company_matches
+from core.matching.similarity import DocumentMeta, find_cross_company_matches, rank_candidates_by_company
 from core.models.enums import MatchStatus
 
 
@@ -239,3 +239,75 @@ def test_matches_one_per_other_company_not_a_single_global_best() -> None:
         meta[m.matched_document_id].company_id for m in matches if m.document_id == "migdal:a"
     }
     assert matched_companies == {"phoenix", "clal"}
+
+
+def test_inactive_document_is_still_a_valid_source() -> None:
+    """A superseded/historical appendix (is_active=False) must still be
+    able to find its current cross-company equivalent - only being a
+    CANDIDATE is restricted, not being a source. See DocumentMeta.is_active."""
+    embeddings = {
+        "migdal:old": [1.0, 0.0],
+        "phoenix:current": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:old": DocumentMeta(company_id="migdal", domain="health", is_active=False),
+        "phoenix:current": DocumentMeta(company_id="phoenix", domain="health", is_active=True),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    by_doc = {m.document_id: m for m in matches}
+    assert by_doc["migdal:old"].matched_document_id == "phoenix:current"
+
+
+def test_inactive_document_is_never_a_candidate() -> None:
+    """An active document must never be matched *against* a superseded one,
+    even if it's the closest embedding score available. With only these two
+    documents: phoenix:old (source) legitimately finds migdal:current
+    (active candidate) - that's the asymmetry this fix is for - but
+    migdal:current (source) must find NO match at all, since its only
+    possible candidate (phoenix:old) is inactive."""
+    embeddings = {
+        "migdal:current": [1.0, 0.0],
+        "phoenix:old": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:current": DocumentMeta(company_id="migdal", domain="health", is_active=True),
+        "phoenix:old": DocumentMeta(company_id="phoenix", domain="health", is_active=False),
+    }
+
+    matches = find_cross_company_matches(embeddings, meta)
+    by_doc = {m.document_id: m for m in matches}
+    assert "migdal:current" not in by_doc
+    assert by_doc["phoenix:old"].matched_document_id == "migdal:current"
+
+
+def test_inactive_vs_inactive_never_matches() -> None:
+    embeddings = {
+        "migdal:old": [1.0, 0.0],
+        "phoenix:old": [1.0, 0.0],
+    }
+    meta = {
+        "migdal:old": DocumentMeta(company_id="migdal", domain="health", is_active=False),
+        "phoenix:old": DocumentMeta(company_id="phoenix", domain="health", is_active=False),
+    }
+
+    assert find_cross_company_matches(embeddings, meta) == []
+
+
+def test_rank_candidates_by_company_excludes_inactive_candidates() -> None:
+    """Same active-candidate-only rule applies to the judge shortlist path
+    (core.matching.semantic_judge via scripts/judge_matches.py)."""
+    embeddings = {
+        "migdal:current": [1.0, 0.0],
+        "phoenix:old": [1.0, 0.0],
+        "phoenix:current": [0.99, 0.14106736],
+    }
+    meta = {
+        "migdal:current": DocumentMeta(company_id="migdal", domain="health", is_active=True),
+        "phoenix:old": DocumentMeta(company_id="phoenix", domain="health", is_active=False),
+        "phoenix:current": DocumentMeta(company_id="phoenix", domain="health", is_active=True),
+    }
+
+    result = rank_candidates_by_company(embeddings, meta)
+    candidate_ids = {cid for cid, _score in result["migdal:current"]["phoenix"]}
+    assert candidate_ids == {"phoenix:current"}

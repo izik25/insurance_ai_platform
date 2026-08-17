@@ -34,6 +34,7 @@ trusts the filename hint (see extract_fields below).
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 from companies.hachshara.config import HachsharaConfig
@@ -54,6 +55,34 @@ _APPENDIX_MENTION = re.compile(
 _DIGITS = re.compile(r"\d+")
 _APPENDIX_KEYWORDS = {"נספח", "מספר", "מס"}
 _HEADER_Y_FRACTION = 0.20  # top ~20% of page 1 (confirmed sample: header at y=90-127 of 842pt)
+
+# "גרסה" (edition/version) followed by a MM/YYYY or MM.YYYY date, or the
+# reverse - PyMuPDF's stream order for this RTL word+date pair flips
+# between documents (confirmed live across a sample of real Hachshara
+# PDFs: e.g. "10.2023 גרסה" in most, but "גרסה10/2014" - no space, word
+# first - in others). No structured validity date exists on Hachshara's
+# listing page for this (unlike Harel/Clal/Direct Insurance/Migdal), but
+# this "גרסה" marker on page 1 (occasionally page 2) reliably does -
+# confirmed on ~85% of a live sample; the rest have no version marker at
+# all and are left with no marketing dates (same "no signal -> active"
+# default as every other company, an accepted gap like AIG's).
+_VERSION_PATTERN = re.compile(
+    r"(?:(?P<d1>\d{1,2}[./]\d{4})\s*גרסה|גרסה\s*(?P<d2>\d{1,2}[./]\d{4}))"
+)
+
+
+def find_version_date(text: str) -> date | None:
+    """Extract the "גרסה MM/YYYY" (or MM.YYYY, either word order) edition
+    marker from a document's text - see _VERSION_PATTERN's comment."""
+    match = _VERSION_PATTERN.search(text)
+    if match is None:
+        return None
+    raw = match.group("d1") or match.group("d2")
+    month_str, year_str = re.split(r"[./]", raw)
+    try:
+        return date(int(year_str), int(month_str), 1)
+    except ValueError:
+        return None
 
 
 def _find_appendix_numbers(text: str) -> list[str]:

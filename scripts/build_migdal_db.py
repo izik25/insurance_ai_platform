@@ -79,6 +79,8 @@ def main() -> None:
                 appendix_number=fields.get("appendix_number") or [],
                 appendix_name=ref.policy_name if ref else None,
                 department_name=ref.department_name if ref else None,
+                marketing_start_date=ref.marketing_start_date if ref else None,
+                marketing_end_date=ref.marketing_end_date if ref else None,
                 pages_count=pages_count,
                 extraction_method="text" if text.strip() else "ocr",
             )

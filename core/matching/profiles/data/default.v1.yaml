@@ -1,0 +1,66 @@
+# Default matching profile - v1 (fallback for any category without its own
+# {category_id}.v1.yaml override).
+#
+# PRE-CALIBRATION placeholder: weights/thresholds below are reasonable
+# starting points informed by domain knowledge and the existing
+# similarity_auto_confirm_threshold=0.90 (core/config/settings.py), not yet
+# derived from scripts/calibrate_matching.py (Phase 3/5 - requires
+# document_fingerprints to exist first, which requires the Phase 2 pilot).
+# Once calibration runs, category-specific overrides should be written as
+# new {category_id}.v1.yaml files (or this file bumped to v2) rather than
+# edited in place, per document_pipeline_status's version-based cache
+# invalidation.
+version: v1
+category_id: default
+
+feature_weights:
+  - dimension: category
+    weight: 0.20
+    importance: CRITICAL
+  - dimension: coverage
+    weight: 0.10
+    importance: HIGH
+  - dimension: insured_event
+    weight: 0.20
+    importance: CRITICAL
+  - dimension: covered_events
+    weight: 0.15
+    importance: HIGH
+  - dimension: exclusions
+    weight: 0.10
+    importance: MEDIUM
+  - dimension: eligibility
+    weight: 0.05
+    importance: MEDIUM
+  - dimension: periods
+    weight: 0.05
+    importance: MEDIUM
+  - dimension: benefit
+    weight: 0.10
+    importance: HIGH
+  - dimension: definitions
+    weight: 0.05
+    importance: LOW
+
+hard_constraints:
+  - id: main_category_mismatch
+    description_he: main_category שונה לחלוטין (למשל HEALTH מול LIFE) פוסל התאמה.
+    rule: main_category_mismatch
+  - id: coverage_family_mismatch
+    description_he: coverage_family שונה מהותית (למשל SURGERIES מול MEDICATIONS) פוסל התאמה, אלא אם כן מופיע ב-alternative_categories של אחד הצדדים.
+    rule: coverage_family_mismatch
+  - id: benefit_model_incompatible
+    description_he: benefit_model שונה באופן שאינו תואם (למשל LUMP_SUM מול IN_KIND_SERVICE) פוסל התאמה.
+    rule: benefit_model_incompatible
+  - id: target_population_incompatible
+    description_he: target_population שונה באופן שאינו תואם (למשל CHILDREN מול GENERAL) פוסל התאמה.
+    rule: target_population_incompatible
+
+thresholds:
+  auto_match: 0.90
+  deep_verification: 0.75
+  ambiguous: 0.60
+  reject: 0.60
+
+margin_rules:
+  min_margin_for_high_confidence: 0.05

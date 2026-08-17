@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
   callPublicAppendixApi,
+  fetchAnalysis,
   fetchDocuments,
   fetchExtraction,
   fetchMatches,
@@ -9,6 +10,7 @@ import {
   fetchPublicAppendixMatches,
   getDocumentFileUrl,
   updateMatchStatus,
+  type DocumentAnalysisOut,
   type DocumentOut,
   type ExtractionOut,
   type MatchOut,
@@ -58,6 +60,7 @@ function StatCard({
 interface DocumentFilters {
   company: string;
   domain: string;
+  mainCategory: string;
   search: string;
   extraction: "all" | "done" | "pending";
   embedding: "all" | "done" | "pending";
@@ -66,6 +69,7 @@ interface DocumentFilters {
 const EMPTY_FILTERS: DocumentFilters = {
   company: "",
   domain: "",
+  mainCategory: "",
   search: "",
   extraction: "all",
   embedding: "all",
@@ -74,6 +78,7 @@ const EMPTY_FILTERS: DocumentFilters = {
 function documentMatchesFilters(d: DocumentOut, filters: DocumentFilters): boolean {
   if (filters.company && d.company_id !== filters.company) return false;
   if (filters.domain && d.domain !== filters.domain) return false;
+  if (filters.mainCategory && d.main_category !== filters.mainCategory) return false;
   if (filters.extraction === "done" && !d.has_extraction) return false;
   if (filters.extraction === "pending" && d.has_extraction) return false;
   if (filters.embedding === "done" && !d.has_embedding) return false;
@@ -88,11 +93,30 @@ function documentMatchesFilters(d: DocumentOut, filters: DocumentFilters): boole
   return true;
 }
 
+// English taxonomy main_category codes -> short Hebrew labels, for display
+// only (core/taxonomy/data/taxonomy.v1.yaml keeps category_id/main_category
+// as stable English identifiers - this mapping is purely cosmetic and safe
+// to fall back to the raw code for any category not listed here).
+const MAIN_CATEGORY_LABELS: Record<string, string> = {
+  HEALTH: "בריאות",
+  LIFE: "חיים",
+  DISABILITY: "נכות/אכ״ע",
+  ACCIDENTS: "תאונות",
+  LONG_TERM_CARE: "סיעוד",
+  SERVICE: "שירות",
+  OTHER: "אחר",
+};
+
+function mainCategoryLabel(code: string): string {
+  return MAIN_CATEGORY_LABELS[code] ?? code;
+}
+
 function FilterBar({
   filters,
   onChange,
   companies,
   domains,
+  mainCategories,
   resultCount,
   totalCount,
 }: {
@@ -100,12 +124,14 @@ function FilterBar({
   onChange: (next: DocumentFilters) => void;
   companies: string[];
   domains: string[];
+  mainCategories: string[];
   resultCount: number;
   totalCount: number;
 }) {
   const hasActiveFilters =
     Boolean(filters.company) ||
     Boolean(filters.domain) ||
+    Boolean(filters.mainCategory) ||
     Boolean(filters.search) ||
     filters.extraction !== "all" ||
     filters.embedding !== "all";
@@ -136,6 +162,20 @@ function FilterBar({
           {domains.map((d) => (
             <option key={d} value={d}>
               {d}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="filter-field">
+        <label>קטגוריה</label>
+        <select
+          value={filters.mainCategory}
+          onChange={(e) => onChange({ ...filters, mainCategory: e.target.value })}
+        >
+          <option value="">כל הקטגוריות</option>
+          {mainCategories.map((c) => (
+            <option key={c} value={c}>
+              {mainCategoryLabel(c)}
             </option>
           ))}
         </select>
@@ -202,13 +242,15 @@ function DocumentsTable({
     <div className="table-wrap">
       <table className="fixed-table documents-table">
         <colgroup>
+          <col style={{ width: "8%" }} />
+          <col style={{ width: "6%" }} />
+          <col style={{ width: "18%" }} />
           <col style={{ width: "9%" }} />
-          <col style={{ width: "7%" }} />
-          <col style={{ width: "28%" }} />
-          <col style={{ width: "10%" }} />
-          <col style={{ width: "22%" }} />
-          <col style={{ width: "10%" }} />
-          <col style={{ width: "7%" }} />
+          <col style={{ width: "18%" }} />
+          <col style={{ width: "13%" }} />
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "6%" }} />
+          <col style={{ width: "6%" }} />
           <col style={{ width: "7%" }} />
         </colgroup>
         <thead>
@@ -218,9 +260,11 @@ function DocumentsTable({
             <th>שם קובץ</th>
             <th>מספר נספח</th>
             <th>שם נספח</th>
+            <th>קטגוריה</th>
             <th>שיטת חילוץ</th>
             <th>חילוץ</th>
             <th>Embedding</th>
+            <th>בתוקף</th>
           </tr>
         </thead>
         <tbody>
@@ -242,9 +286,26 @@ function DocumentsTable({
               <td className="truncate" title={d.appendix_name ?? ""}>
                 {d.appendix_name ?? "—"}
               </td>
+              <td
+                className="truncate"
+                title={d.category_id ?? "טרם סווג"}
+              >
+                {d.main_category
+                  ? `${mainCategoryLabel(d.main_category)}${d.coverage_family ? ` / ${d.coverage_family}` : ""}`
+                  : "—"}
+              </td>
               <td>{d.extraction_method}</td>
               <td>{d.has_extraction ? "✓" : "—"}</td>
               <td>{d.has_embedding ? "✓" : "—"}</td>
+              <td
+                title={
+                  d.marketing_end_date
+                    ? `תאריך סיום שיווק: ${d.marketing_end_date}`
+                    : "ללא תאריך סיום שיווק ידוע"
+                }
+              >
+                {d.is_active ? "✓" : "✗ היסטורי"}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -290,6 +351,14 @@ function StatusRow({
       <div>
         <span className="field-label">Embedding</span>
         <span>{document.has_embedding ? "✓ בוצע" : "— טרם בוצע"}</span>
+      </div>
+      <div>
+        <span className="field-label">בתוקף (משווק כעת)</span>
+        <span>
+          {document.is_active
+            ? "✓ כן"
+            : `✗ לא — הופסק שיווקו${document.marketing_end_date ? ` ב-${document.marketing_end_date}` : ""}`}
+        </span>
       </div>
       <div>
         <span className="field-label">התאמה חוצת-חברות</span>
@@ -449,6 +518,93 @@ function ExtractionPanel({ extraction }: { extraction: ExtractionOut | null }) {
   );
 }
 
+function AnalysisPanel({ analysis }: { analysis: DocumentAnalysisOut | null }) {
+  if (!analysis || (!analysis.classification && !analysis.canonical_profile && !analysis.fingerprint)) {
+    return <p className="muted">למסמך זה עדיין אין ניתוח טקסונומיה/פרופיל קנוני (טרם עבר את שלב הסיווג/העשרה).</p>;
+  }
+  const { classification, canonical_profile: profile, fingerprint } = analysis;
+  return (
+    <div className="extraction-panel">
+      {classification && (
+        <div className="field-grid">
+          <div>
+            <span className="field-label">קטגוריה ראשית</span>
+            <span>{mainCategoryLabel(classification.main_category)}</span>
+          </div>
+          <div>
+            <span className="field-label">משפחת כיסוי</span>
+            <span>{classification.coverage_family}</span>
+          </div>
+          <div>
+            <span className="field-label">תת-סוג</span>
+            <span>{classification.coverage_subtype ?? "—"}</span>
+          </div>
+          <div>
+            <span className="field-label">רמת ביטחון בסיווג</span>
+            <span>{classification.confidence != null ? `${(classification.confidence * 100).toFixed(0)}%` : "—"}</span>
+          </div>
+        </div>
+      )}
+      {profile && (
+        <>
+          <div className="field-block">
+            <span className="field-label">מקרה הביטוח (מנורמל)</span>
+            <p>{profile.insured_event ?? "—"}</p>
+          </div>
+          <ListField label="אירועים מכוסים (מנורמל)" items={profile.covered_events} />
+          <ListField label="חריגים (מנורמל)" items={profile.exclusions_normalized} />
+          <div className="field-grid">
+            <div>
+              <span className="field-label">סוג תגמול</span>
+              <span>{profile.benefit_type ?? "—"}</span>
+            </div>
+            <div>
+              <span className="field-label">תקופת המתנה (טקסט)</span>
+              <span>{profile.waiting_period_text ?? "—"}</span>
+            </div>
+            <div>
+              <span className="field-label">תקופת אכשרה (טקסט)</span>
+              <span>{profile.qualifying_period_text ?? "—"}</span>
+            </div>
+            <div>
+              <span className="field-label">תקופת הישרדות (טקסט)</span>
+              <span>{profile.survival_period_text ?? "—"}</span>
+            </div>
+          </div>
+        </>
+      )}
+      {fingerprint && (
+        <div className="field-grid">
+          <div>
+            <span className="field-label">תקופת המתנה (ימים)</span>
+            <span>{fingerprint.waiting_period_days ?? "—"}</span>
+          </div>
+          <div>
+            <span className="field-label">תקופת אכשרה (ימים)</span>
+            <span>{fingerprint.qualifying_period_days ?? "—"}</span>
+          </div>
+          <div>
+            <span className="field-label">תקרת תגמול</span>
+            <span>
+              {fingerprint.maximum_benefit != null
+                ? `${fingerprint.maximum_benefit.toLocaleString()} ${fingerprint.benefit_amount_currency ?? ""}`
+                : "—"}
+            </span>
+          </div>
+          <div>
+            <span className="field-label">מס׳ אירועים מכוסים</span>
+            <span>{fingerprint.covered_event_count}</span>
+          </div>
+          <div>
+            <span className="field-label">מס׳ חריגים מהותיים</span>
+            <span>{fingerprint.major_exclusion_count}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MatchesTable({
   matches,
   onSelect,
@@ -514,14 +670,20 @@ function DocumentDetailModal({
 }) {
   const [extraction, setExtraction] = useState<ExtractionOut | null>(null);
   const [matches, setMatches] = useState<MatchOut[]>([]);
+  const [analysis, setAnalysis] = useState<DocumentAnalysisOut | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchExtraction(document.id), fetchMatchesForDocument(document.id)])
-      .then(([ext, m]) => {
+    Promise.all([
+      fetchExtraction(document.id),
+      fetchMatchesForDocument(document.id),
+      fetchAnalysis(document.id),
+    ])
+      .then(([ext, m, an]) => {
         setExtraction(ext);
         setMatches(m);
+        setAnalysis(an);
       })
       .finally(() => setLoading(false));
   }, [document.id]);
@@ -563,6 +725,8 @@ function DocumentDetailModal({
             <StatusRow document={document} matches={matches} />
             <h3>שדות שחולצו</h3>
             <ExtractionPanel extraction={extraction} />
+            <h3>ניתוח טקסונומיה ופרופיל קנוני</h3>
+            <AnalysisPanel analysis={analysis} />
             <h3>התאמות למסמך זה</h3>
             <DocumentMatchesTable documentId={document.id} matches={matches} onSelect={onSelectMatch} />
           </>
@@ -1414,6 +1578,14 @@ function App() {
     [documents]
   );
 
+  const mainCategories = useMemo(
+    () =>
+      Array.from(new Set(documents.map((d) => d.main_category)))
+        .filter((c): c is string => Boolean(c))
+        .sort(),
+    [documents]
+  );
+
   const filteredDocuments = useMemo(
     () => documents.filter((d) => documentMatchesFilters(d, filters)),
     [documents, filters]
@@ -1444,7 +1616,9 @@ function App() {
             <StatCard label="Embeddings" value={stats.embedded} />
             <StatCard label="התאמות מאושרות" value={autoConfirmed.length} />
             <StatCard label="ממתינות לבדיקה" value={pendingReview.length} />
-            {[...stats.byCompany.entries()].map(([company, count]) => (
+            {[...stats.byCompany.entries()]
+              .filter(([, count]) => count > 1)
+              .map(([company, count]) => (
               <StatCard
                 key={company}
                 label={company}
@@ -1467,6 +1641,7 @@ function App() {
               onChange={setFilters}
               companies={[...stats.byCompany.keys()].sort()}
               domains={domains}
+              mainCategories={mainCategories}
               resultCount={filteredDocuments.length}
               totalCount={documents.length}
             />

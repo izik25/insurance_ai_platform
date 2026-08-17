@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import fitz
 import numpy as np
 
 from companies.hachshara.config import HachsharaConfig
-from companies.hachshara.extractor import HachsharaExtractor
+from companies.hachshara.extractor import HachsharaExtractor, find_version_date
 from companies.hachshara.parser import HachsharaParser
 from core.ocr.engine import OcrResult
 
@@ -209,3 +210,19 @@ def test_real_life_document_with_abbreviated_mispar_form() -> None:
     fields = extractor.extract_fields(file_path, text)
 
     assert fields["appendix_number"] == ["662"]
+
+
+def test_find_version_date_date_before_word_slash_separator() -> None:
+    """Real stream order seen live: "10.2023 גרסה" / "03/2025 גרסה"."""
+    assert find_version_date("...  3 מתוך1 עמוד | 10.2023 גרסה |  נספח ...") == date(2023, 10, 1)
+    assert find_version_date("...www.hcsra.co.il | 03/2025 גרסה | ...") == date(2025, 3, 1)
+
+
+def test_find_version_date_word_before_date_no_space() -> None:
+    """Real stream order seen live (reversed vs. the more common case):
+    "גרסה10/2014" - no space, word before date."""
+    assert find_version_date("עמוד1 |  מתוך8 | גרסה10/2014 |  נספח |") == date(2014, 10, 1)
+
+
+def test_find_version_date_no_marker_returns_none() -> None:
+    assert find_version_date("some unrelated document text with no version marker") is None

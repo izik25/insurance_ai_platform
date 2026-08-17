@@ -1,0 +1,333 @@
+# Insurance coverage taxonomy - v1
+#
+# Built empirically from the live corpus (5258 documents / 8 companies), not
+# from the illustrative examples in the upgrade spec alone. Primary inputs:
+#   - data/processed/taxonomy_analysis/coverage_type_clusters.json (LLM-extracted
+#     coverage_type, embedding-clustered - dominant, well-concentrated signal:
+#     top ~16 clusters already cover the large majority of the 5252 extractions).
+#   - department_name (Migdal/DirectInsurance's own curated ~16-value taxonomy).
+#   - disease_list frequency table (critical-illness appendices - a fairly
+#     standardized closed vocabulary across companies: cancer, stroke, MS,
+#     blindness, chronic renal failure, Parkinson's, heart attack, paralysis,
+#     deafness, fulminant liver failure, organ transplant, total/permanent
+#     disability, limb loss, severe burns, coma, ...).
+#   - each company's own site-level category config (companies/*/config.py):
+#     Phoenix "Covers" (אמבלוטורי/גנטיקס/השתלות/כתבי שירות/מחלות קשות/ניתוחים/
+#     סיעוד/עובדים זרים/רפואה משלימה/שיניים/תאונות אישיות/תרופות), Harel areas,
+#     Menorah lines-of-business.
+#
+# This is a first cut (v1), not a final classifier. category_id is the
+# stable join key used everywhere else (question bank, matching profiles,
+# candidate index) - a future revision must add a new category_id rather
+# than repurposing an existing one, and bump to taxonomy.v2.yaml so
+# document_pipeline_status can tell which documents were classified against
+# which version. Every main_category gets an explicit "other/unclassified"
+# leaf so a document is never left without a category_id, per the
+# requirement not to conflate "didn't fit" with "wasn't looked at".
+version: v1
+categories:
+  # ---------------------------------------------------------------- HEALTH
+  - category_id: health.surgeries.israel
+    main_category: HEALTH
+    coverage_family: SURGERIES
+    coverage_subtype: ISRAEL_SURGERIES
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: ניתוחים וטיפולים מחליפי ניתוח בישראל
+    description_he: >
+      כיסוי הוצאות ניתוח (לרבות "מהשקל הראשון" ומשלים שב"ן) וטיפולים
+      מחליפי ניתוח המבוצעים בישראל.
+    alternative_categories: [health.surgeries.alternatives]
+
+  - category_id: health.surgeries.overseas
+    main_category: HEALTH
+    coverage_family: SURGERIES
+    coverage_subtype: OVERSEAS_SURGERIES
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: ניתוחים בחו"ל
+    description_he: כיסוי הוצאות ניתוח פרטי המתבצע מחוץ לישראל.
+
+  - category_id: health.surgeries.alternatives
+    main_category: HEALTH
+    coverage_family: SURGERIES
+    coverage_subtype: SURGERY_ALTERNATIVES
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: טיפולים מחליפי ניתוח
+    description_he: כיסוי טיפולים רפואיים המהווים חלופה לניתוח (למשל קרינה/צנתור).
+    alternative_categories: [health.surgeries.israel]
+
+  - category_id: health.critical_illness.general
+    main_category: HEALTH
+    coverage_family: CRITICAL_ILLNESS
+    coverage_subtype: GENERAL
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: מחלות קשות - כללי
+    description_he: >
+      פיצוי חד-פעמי בגילוי אחת מרשימת מחלות/מצבים רפואיים קשים סגורה
+      (למשל שבץ מוחי, טרשת נפוצה, אי ספיקת כליות כרונית, פרקינסון,
+      התקף לב, שיתוק, חירשות, עיוורון, כוויות קשות, תרדמת, נכות מלאה
+      ותמידית) - לא ממוקד סרטן בלבד.
+    alternative_categories: [health.critical_illness.cancer]
+
+  - category_id: health.critical_illness.cancer
+    main_category: HEALTH
+    coverage_family: CRITICAL_ILLNESS
+    coverage_subtype: CANCER
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: מחלות קשות - סרטן
+    description_he: >
+      כיסוי ממוקד למחלת הסרטן בלבד (למשל "פיצוי חד פעמי לגילוי מחלת
+      סרטן", "ליווי רפואי אישי לסרטן") - להבדיל מרשימת המחלות הקשות
+      הכללית.
+    alternative_categories: [health.critical_illness.general]
+
+  - category_id: health.transplants
+    main_category: HEALTH
+    coverage_family: TRANSPLANTS
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: השתלות וטיפולים מיוחדים בחו"ל
+    description_he: כיסוי השתלת איברים וטיפולים רפואיים מיוחדים שאינם זמינים בארץ.
+    alternative_categories: [health.critical_illness.general]
+
+  - category_id: health.medications
+    main_category: HEALTH
+    coverage_family: MEDICATIONS
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: תרופות
+    description_he: כיסוי תרופות שאינן כלולות בסל הבריאות הממלכתי, לרבות תרופות מיוחדות.
+
+  - category_id: health.ambulatory
+    main_category: HEALTH
+    coverage_family: AMBULATORY
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: אמבולטורי
+    description_he: כיסוי שירותים רפואיים אמבולטוריים (שאינם אשפוז) - טכנולוגיות מתקדמות ברפואה וכדומה.
+
+  - category_id: health.consultations_diagnostics
+    main_category: HEALTH
+    coverage_family: CONSULTATIONS_AND_DIAGNOSTICS
+    benefit_model: IN_KIND_SERVICE
+    target_population: INDIVIDUAL
+    display_name_he: ייעוץ ואבחון רפואי
+    description_he: ייעוץ רפואי מקוון/טלפוני, בדיקות אבחנתיות, שירותי אבחון וסקר רפואי.
+
+  - category_id: health.complementary_medicine
+    main_category: HEALTH
+    coverage_family: COMPLEMENTARY_MEDICINE
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: רפואה משלימה
+    description_he: כיסוי טיפולי רפואה משלימה/אלטרנטיבית.
+
+  - category_id: health.dental
+    main_category: HEALTH
+    coverage_family: DENTAL
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: שיניים
+    description_he: כיסוי טיפולי שיניים.
+
+  - category_id: health.nursing_care
+    main_category: HEALTH
+    coverage_family: NURSING_CARE
+    benefit_model: MONTHLY_ANNUITY
+    target_population: INDIVIDUAL
+    display_name_he: סיעוד (בתוך בריאות)
+    description_he: >
+      כיסוי סיעודי המסווג ע"י חלק מהחברות תחת "בריאות" ולא כפוליסת
+      סיעוד עצמאית - להבדיל מ-LONG_TERM_CARE שהוא ביטוח סיעוד ייעודי.
+    alternative_categories: [long_term_care.general]
+
+  - category_id: health.medical_expenses_general
+    main_category: HEALTH
+    coverage_family: MEDICAL_EXPENSES_GENERAL
+    coverage_subtype: SUPPLEMENTARY
+    benefit_model: REIMBURSEMENT
+    target_population: INDIVIDUAL
+    display_name_he: ביטוח בריאות/רפואי כללי ומשלים
+    description_he: >
+      פוליסת/כיסוי בריאות כללי שאינו נופל תחת אחת מתתי-הקטגוריות
+      הממוקדות למעלה (למשל "ביטוח בריאות", "פוליסת ביטוח בריאות",
+      "ביטוח רפואי משלים", "כיסוי הוצאות רפואיות") - הקטגוריה
+      הגדולה ביותר במאגר בפועל (כ-2645 מתוך כ-5252 חילוצים לפי
+      coverage_type), ולכן צפויה להתפצל הלאה בגרסה עתידית של
+      הטקסונומיה לאחר סקירת תוצאות הסיווג בפועל (Phase 2/6).
+
+  - category_id: health.children_services
+    main_category: HEALTH
+    coverage_family: CHILDREN_SERVICES
+    benefit_model: IN_KIND_SERVICE
+    target_population: CHILDREN
+    display_name_he: שירותים רפואיים לילדים
+    description_he: נספחי שירותים/כיסויים ייעודיים לילדים (למשל "נספח שירותים לילד").
+
+  - category_id: health.foreign_workers
+    main_category: HEALTH
+    coverage_family: FOREIGN_WORKERS_MEDICAL
+    benefit_model: REIMBURSEMENT
+    target_population: FOREIGN_WORKERS
+    display_name_he: ביטוח רפואי לעובדים זרים
+    description_he: כיסוי רפואי ייעודי לעובדים זרים.
+
+  - category_id: health.other
+    main_category: HEALTH
+    coverage_family: OTHER
+    display_name_he: בריאות - לא מסווג
+    description_he: כיסוי בתחום הבריאות שאינו תואם אף תת-קטגוריה קיימת.
+
+  # -------------------------------------------------------------- SERVICE
+  - category_id: service.medical_service
+    main_category: SERVICE
+    coverage_family: MEDICAL_SERVICE
+    benefit_model: IN_KIND_SERVICE
+    target_population: INDIVIDUAL
+    display_name_he: כתב שירות רפואי
+    description_he: >
+      "כתבי שירות" - מתן שירות בעין (לא שיפוי כספי) כגון ייעוץ מקוון,
+      ליווי רפואי אישי, רפואה משלימה במסגרת כתב שירות.
+    alternative_categories: [health.consultations_diagnostics]
+
+  - category_id: service.other
+    main_category: SERVICE
+    coverage_family: OTHER
+    display_name_he: שירות - לא מסווג
+    description_he: כיסוי מסוג "שירות" שאינו תואם אף תת-קטגוריה קיימת.
+
+  # ----------------------------------------------------------------- LIFE
+  - category_id: life.death_benefit
+    main_category: LIFE
+    coverage_family: DEATH_BENEFIT
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: ביטוח למקרה מוות
+    description_he: תשלום סכום ביטוח (קבוע או צמוד למדד) במקרה פטירת המבוטח.
+
+  - category_id: life.savings_linked
+    main_category: LIFE
+    coverage_family: SAVINGS_LINKED
+    benefit_model: SAVINGS
+    target_population: INDIVIDUAL
+    display_name_he: ביטוח חיים עם חיסכון/משתתף ברווחים
+    description_he: ביטוח חיים הכולל מרכיב חיסכון/השקעה (משתתף ברווחי תיק השקעות, קופת גמל לקצבה וכד').
+
+  - category_id: life.mortgage_life
+    main_category: LIFE
+    coverage_family: MORTGAGE_LIFE
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: ביטוח חיים למשכנתא
+    description_he: ביטוח חיים המיועד להבטחת פירעון משכנתא.
+
+  - category_id: life.group_life
+    main_category: LIFE
+    coverage_family: GROUP_LIFE
+    target_population: GROUP_EMPLOYER
+    display_name_he: ביטוח חיים קבוצתי/קולקטיבי
+    description_he: פוליסת חיים במסגרת קבוצתית/מעסיק (מגדל "קולקטיבים" וכד').
+
+  - category_id: life.other
+    main_category: LIFE
+    coverage_family: OTHER
+    display_name_he: חיים - לא מסווג
+    description_he: כיסוי בתחום החיים שאינו תואם אף תת-קטגוריה קיימת.
+
+  # ----------------------------------------------------------- DISABILITY
+  - category_id: disability.loss_of_work_capacity
+    main_category: DISABILITY
+    coverage_family: LOSS_OF_WORK_CAPACITY
+    benefit_model: MONTHLY_ANNUITY
+    target_population: INDIVIDUAL
+    display_name_he: אובדן כושר עבודה
+    description_he: >
+      פיצוי חודשי ו/או שחרור מתשלום פרמיות עקב אובדן כושר עבודה מלא
+      או חלקי, לרבות פיצול צווארון-לבן/צווארון-כחול לפי מקצוע.
+
+  - category_id: disability.other
+    main_category: DISABILITY
+    coverage_family: OTHER
+    display_name_he: נכות/אובדן כושר עבודה - לא מסווג
+    description_he: כיסוי נכות/אובדן כושר עבודה שאינו תואם אף תת-קטגוריה קיימת.
+
+  # ------------------------------------------------------------ ACCIDENTS
+  - category_id: accidents.personal_accidents
+    main_category: ACCIDENTS
+    coverage_family: PERSONAL_ACCIDENTS
+    display_name_he: תאונות אישיות
+    description_he: כיסוי כללי לנזקי גוף כתוצאה מתאונה (לא נכות/מוות בלבד).
+
+  - category_id: accidents.accidental_disability
+    main_category: ACCIDENTS
+    coverage_family: ACCIDENTAL_DISABILITY
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: נכות מתאונה
+    description_he: פיצוי בגין נכות (מלאה/חלקית, צמיתה/זמנית) כתוצאה מתאונה.
+    alternative_categories: [disability.loss_of_work_capacity]
+
+  - category_id: accidents.accidental_death
+    main_category: ACCIDENTS
+    coverage_family: ACCIDENTAL_DEATH
+    benefit_model: LUMP_SUM
+    target_population: INDIVIDUAL
+    display_name_he: מוות מתאונה
+    description_he: תשלום סכום ביטוח נוסף במקרה מוות שנגרם כתוצאה מתאונה.
+    alternative_categories: [life.death_benefit]
+
+  - category_id: accidents.other
+    main_category: ACCIDENTS
+    coverage_family: OTHER
+    display_name_he: תאונות - לא מסווג
+    description_he: כיסוי תאונות שאינו תואם אף תת-קטגוריה קיימת.
+
+  # -------------------------------------------------------- LONG_TERM_CARE
+  - category_id: long_term_care.general
+    main_category: LONG_TERM_CARE
+    coverage_family: GENERAL
+    benefit_model: MONTHLY_ANNUITY
+    target_population: INDIVIDUAL
+    display_name_he: ביטוח סיעודי
+    description_he: >
+      פוליסת/כיסוי סיעוד עצמאי (תגמול סיעודי חודשי, לרבות "סיעוד עם
+      תקופת המתנה ארוכה") - להבדיל מ-health.nursing_care שהוא כיסוי
+      סיעודי המשולב בתוך פוליסת בריאות.
+    alternative_categories: [health.nursing_care]
+
+  - category_id: long_term_care.other
+    main_category: LONG_TERM_CARE
+    coverage_family: OTHER
+    display_name_he: סיעוד - לא מסווג
+    description_he: כיסוי סיעודי שאינו תואם אף תת-קטגוריה קיימת.
+
+  # ---------------------------------------------------------------- OTHER
+  - category_id: other.travel
+    main_category: OTHER
+    coverage_family: TRAVEL
+    display_name_he: ביטוח נסיעות לחו"ל
+    description_he: >
+      ביטוח נסיעות לחו"ל - מופיע בנפח לא-זניח במאגר (כ-112 מתוך
+      coverage_type) אך אינו כיסוי בריאות/חיים במובן המקובל; מסומן
+      בנפרד כדי לא "לדחוס" אותו לתוך HEALTH.
+
+  - category_id: other.pension_savings
+    main_category: OTHER
+    coverage_family: PENSION_SAVINGS
+    display_name_he: פנסיה/קופת גמל/קצבה
+    description_he: >
+      מוצרי חיסכון פנסיוני (קופת גמל, קצבה, פנסיית נכות) - מחוץ
+      לתחום ביטוחי הבריאות/חיים המרכזי (ר' גם classify_department()
+      ב-companies/migdal/config.py שמחריג במפורש "חיסכון אישי").
+
+  - category_id: other.unclassified
+    main_category: OTHER
+    coverage_family: UNCLASSIFIED
+    display_name_he: לא מסווג
+    description_he: >
+      נספח שלא ניתן לשייך בבטחון לאף קטגוריה קיימת - ה-fallback
+      החובה לכל מסמך, כדי שסיווג לא-חד-משמעי לא ייפול בשקט.

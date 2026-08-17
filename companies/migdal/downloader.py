@@ -10,12 +10,22 @@ Data flow (confirmed against the live site on 2026-07-15):
 Note: `front.migdal.co.il` (a different subdomain) sits behind an Incapsula
 WAF that rejects plain HTTP calls. This endpoint, on `my.migdal.co.il`, does
 not — it is reachable with a normal HTTP client, no browser needed.
+
+Each item also carries `fromDate`/`ToDate` (ISO8601 UTC timestamps,
+`ToDate` nullable) - confirmed live (2026-08-10) as a genuine per-file
+validity window: `ToDate: null` means this specific PDF is the currently
+active version, a real timestamp means it was superseded (verified against
+real fromDate/ToDate chains where one entry's ToDate lines up with the
+next's fromDate). Since every JSON item is already one specific historical
+PDF file (not a policy-level record), no grouping/chain logic is needed
+here - each `Document` row just reads its own item's ToDate directly.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 import httpx
@@ -48,10 +58,30 @@ class MigdalDocumentRef:
     department_name: str
     domain: str  # "health" | "life" | "mixed"
     download_url: str
+    marketing_start_date: date | None = None  # "fromDate"
+    marketing_end_date: date | None = None  # "ToDate" - null on-site == still active
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
         return f"{self.media_folder_id}_{self.original_filename}"
+
+
+def _parse_date(text: str | None) -> date | None:
+    """Parse the API's ISO8601 UTC timestamps; missing/unparseable -> None
+    (missing is the expected, meaningful case for ToDate: null == active)."""
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        logger.warning("Migdal: unparseable date %r", text)
+        return None
 
 
 class MigdalDownloader(BaseDownloader):
@@ -120,6 +150,8 @@ class MigdalDownloader(BaseDownloader):
             department_name=department_name,
             domain=domain,
             download_url=self._config.blob_base_url + stripped,
+            marketing_start_date=_parse_date(item.get("fromDate")),
+            marketing_end_date=_parse_date(item.get("ToDate")),
         )
 
     def download_all(self, destination_dir: Path, limit: int | None = None) -> list[Path]:

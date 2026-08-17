@@ -13,8 +13,11 @@ from fastapi.testclient import TestClient
 from core.database.models import (
     Company,
     Document,
+    DocumentCanonicalProfile,
+    DocumentClassification,
     DocumentEmbedding,
     DocumentExtraction,
+    DocumentFingerprint,
     DocumentMatch,
 )
 from core.database.session import init_db, session_scope
@@ -60,6 +63,15 @@ def two_documents() -> Generator[list[str], None, None]:
         session.query(DocumentExtraction).filter(
             DocumentExtraction.document_id.in_(doc_ids)
         ).delete(synchronize_session=False)
+        session.query(DocumentClassification).filter(
+            DocumentClassification.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
+        session.query(DocumentCanonicalProfile).filter(
+            DocumentCanonicalProfile.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
+        session.query(DocumentFingerprint).filter(
+            DocumentFingerprint.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
         for doc_id in doc_ids:
             document = session.get(Document, doc_id)
             if document is not None:
@@ -83,6 +95,112 @@ def test_list_documents_reports_extraction_and_embedding_flags(
     assert by_id[doc_a]["has_embedding"] is True
     assert by_id[doc_b]["has_extraction"] is False
     assert by_id[doc_b]["has_embedding"] is False
+
+
+def test_list_documents_reports_classification_when_present(two_documents: list[str]) -> None:
+    doc_a, doc_b = two_documents
+    with session_scope() as session:
+        session.add(
+            DocumentClassification(
+                document_id=doc_a,
+                taxonomy_version="v1",
+                category_id="health.critical_illness.cancer",
+                main_category="HEALTH",
+                coverage_family="CRITICAL_ILLNESS",
+                coverage_subtype="CANCER",
+            )
+        )
+
+    response = client.get("/api/documents")
+    assert response.status_code == 200
+    by_id = {d["id"]: d for d in response.json()}
+
+    assert by_id[doc_a]["category_id"] == "health.critical_illness.cancer"
+    assert by_id[doc_a]["main_category"] == "HEALTH"
+    assert by_id[doc_a]["coverage_family"] == "CRITICAL_ILLNESS"
+    assert by_id[doc_b]["category_id"] is None
+    assert by_id[doc_b]["main_category"] is None
+
+
+def test_list_documents_filters_by_main_category(two_documents: list[str]) -> None:
+    doc_a, doc_b = two_documents
+    with session_scope() as session:
+        session.add(
+            DocumentClassification(
+                document_id=doc_a,
+                taxonomy_version="v1",
+                category_id="health.critical_illness.cancer",
+                main_category="HEALTH",
+                coverage_family="CRITICAL_ILLNESS",
+            )
+        )
+
+    response = client.get("/api/documents", params={"main_category": "HEALTH"})
+    assert response.status_code == 200
+    ids = {d["id"] for d in response.json()}
+    assert doc_a in ids
+    assert doc_b not in ids
+
+
+def test_get_document_analysis_returns_null_sections_when_nothing_computed(
+    two_documents: list[str],
+) -> None:
+    response = client.get(f"/api/documents/{two_documents[0]}/analysis")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["classification"] is None
+    assert body["canonical_profile"] is None
+    assert body["fingerprint"] is None
+
+
+def test_get_document_analysis_returns_404_when_document_missing() -> None:
+    response = client.get(f"/api/documents/{uuid.uuid4()}/analysis")
+    assert response.status_code == 404
+
+
+def test_get_document_analysis_returns_computed_sections(two_documents: list[str]) -> None:
+    doc_a = two_documents[0]
+    with session_scope() as session:
+        session.add(
+            DocumentClassification(
+                document_id=doc_a,
+                taxonomy_version="v1",
+                category_id="health.critical_illness.cancer",
+                main_category="HEALTH",
+                coverage_family="CRITICAL_ILLNESS",
+                coverage_subtype="CANCER",
+                confidence=0.95,
+            )
+        )
+        session.add(
+            DocumentCanonicalProfile(
+                document_id=doc_a,
+                profile_version="v1",
+                insured_event="גילוי מחלת הסרטן",
+                covered_events=["אירוע א"],
+                benefit_type="פיצוי חד פעמי",
+                raw_profile={"waiting_period_text": "90 יום"},
+            )
+        )
+        session.add(
+            DocumentFingerprint(
+                document_id=doc_a,
+                fingerprint_version="v1",
+                waiting_period_days=90,
+                covered_event_count=1,
+                major_exclusion_count=0,
+                special_condition_count=0,
+            )
+        )
+
+    response = client.get(f"/api/documents/{doc_a}/analysis")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["classification"]["category_id"] == "health.critical_illness.cancer"
+    assert body["classification"]["confidence"] == 0.95
+    assert body["canonical_profile"]["insured_event"] == "גילוי מחלת הסרטן"
+    assert body["canonical_profile"]["waiting_period_text"] == "90 יום"
+    assert body["fingerprint"]["waiting_period_days"] == 90
 
 
 def test_get_extraction_returns_404_when_missing(two_documents: list[str]) -> None:

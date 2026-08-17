@@ -4,6 +4,7 @@ mocked HTTP transport with `list_documents` monkeypatched."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -105,6 +106,70 @@ def test_refs_from_search_response_returns_empty_on_error() -> None:
     refs = refs_from_search_response("health", body)
 
     assert refs == []
+
+
+def test_refs_from_search_response_parses_marketing_dates() -> None:
+    # Shaped like a real response captured live: a superseded document with
+    # a real past end date.
+    body = {
+        "err": None,
+        "data": [
+            {
+                "documentURL": "https://cdn.menoramivt.co.il/public/docs/20210118/851.pdf",
+                "policyHeader": "אופק רחב, נספח 851",
+                "policyIssueDate": "2009-04-01T12:00:00.000Z",
+                "policyEndDate": "2013-12-01T13:00:00.000Z",
+                "tags": ["נספח 851"],
+            }
+        ],
+    }
+
+    refs = refs_from_search_response("health", body)
+
+    assert refs[0].marketing_start_date == date(2009, 4, 1)
+    assert refs[0].marketing_end_date == date(2013, 12, 1)
+    assert refs[0].is_active is False
+
+
+def test_refs_from_search_response_far_future_end_date_is_active() -> None:
+    # Shaped like a real response captured live: currently-active documents
+    # use a far-future sentinel end date rather than a null/unset marker.
+    body = {
+        "err": None,
+        "data": [
+            {
+                "documentURL": "https://cdn.menoramivt.co.il/public/docs/20251016/942.pdf",
+                "policyHeader": "אופק למשפחה, נספח 942",
+                "policyIssueDate": "2003-08-13T12:00:00.000Z",
+                "policyEndDate": "2100-12-01T13:00:00.000Z",
+                "tags": ["נספח 942"],
+            }
+        ],
+    }
+
+    refs = refs_from_search_response("health", body)
+
+    assert refs[0].marketing_start_date == date(2003, 8, 13)
+    assert refs[0].marketing_end_date is None
+    assert refs[0].is_active is True
+
+
+def test_refs_from_search_response_missing_dates_default_to_active() -> None:
+    body = {
+        "err": None,
+        "data": [
+            {
+                "documentURL": "https://cdn.menoramivt.co.il/public/docs/x.pdf",
+                "policyHeader": "no dates here",
+            }
+        ],
+    }
+
+    refs = refs_from_search_response("health", body)
+
+    assert refs[0].marketing_start_date is None
+    assert refs[0].marketing_end_date is None
+    assert refs[0].is_active is True
 
 
 def test_local_filename_derived_from_url() -> None:

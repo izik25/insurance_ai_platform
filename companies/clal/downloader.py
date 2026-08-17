@@ -16,6 +16,17 @@ calling the API directly (even with matching query params) returns a bare
 404 "No HTTP resource" response - confirmed live, this is bot-management
 rejecting the request, not the application. PDF downloads themselves are
 plain HTTP, no browser required - also confirmed live.
+
+Each policy also carries `StartValidity`/`EndValidity` (ISO datetimes,
+`"0001-01-01T00:00:00"` as the sentinel for "unset") - confirmed live
+(2026-08-10) as a genuine validity window, same role as Harel's
+marketing_start_date/marketing_end_date: the same AttachmentNumber appears
+repeatedly with different, sequential, non-overlapping windows as it's
+superseded over time. `SoldData` (a separate bool on the same payload)
+looked promising but does NOT track this - confirmed live it's a
+product-level "still sold to new customers" flag, not document validity
+(a currently-active-dated entry was seen with SoldData=false, and
+long-expired entries with SoldData=true) - deliberately not used here.
 """
 
 from __future__ import annotations
@@ -23,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -54,6 +66,14 @@ class ClalDocumentRef:
     appendix_number: str  # "" when the site didn't provide one for this document
     policy_type: str  # e.g. "פרטי" / "קולקטיב" - informational only
     download_url: str
+    marketing_start_date: date | None = None  # "StartValidity"
+    marketing_end_date: date | None = None  # "EndValidity" - unset on-site == still active
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
@@ -71,6 +91,22 @@ class ClalDocumentRef:
         digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
         keep = _MAX_FILENAME_LENGTH - len(ext) - len(digest) - 1
         return f"{stem[:keep]}_{digest}{ext}"
+
+
+_UNSET_VALIDITY_SENTINEL = "0001-01-01T00:00:00"
+
+
+def _parse_date(text: str | None) -> date | None:
+    """Parse the API's ISO datetime strings; missing/sentinel/unparseable ->
+    None (None is the expected, meaningful case for EndValidity: unset ==
+    active)."""
+    if not text or text == _UNSET_VALIDITY_SENTINEL:
+        return None
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        logger.warning("Clal: unparseable date %r", text)
+        return None
 
 
 def refs_from_search_response(
@@ -99,6 +135,8 @@ def refs_from_search_response(
             appendix_number=(policy.get("AttachmentNumber") or "").strip(),
             policy_type=(policy.get("PolicyTypeDesc") or "").strip(),
             download_url=f"{media_base_url}{policy['FilePath']}",
+            marketing_start_date=_parse_date(policy.get("StartValidity")),
+            marketing_end_date=_parse_date(policy.get("EndValidity")),
         )
         for policy in policies
         if policy.get("FilePath")

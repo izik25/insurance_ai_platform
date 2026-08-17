@@ -7,6 +7,20 @@ documents' appendix_name/coverage_type/coverage_name share a meaningful
 word - see core.matching.similarity._lexically_corroborated) or
 pending_review otherwise, needing a human look via the dashboard.
 
+Every document is eligible as a SOURCE, but only currently-active documents
+(Document.is_active - no marketing_end_date, or one that hasn't passed yet;
+see companies/harel/downloader.py's module docstring for where that signal
+comes from) are eligible as a CANDIDATE (the matched-against side): a
+superseded historical appendix version is kept in the DB/dashboard for
+viewing and download, and still deserves to be matched against whatever
+currently-active appendix replaced it elsewhere, but it must never itself
+anchor another old document's match, since old-vs-old never describes what
+either side is actually selling today (enforced in
+core.matching.similarity via DocumentMeta.is_active, not by pre-filtering
+who's even in doc_meta). Documents from companies that don't publish a
+marketing end date at all are always active (Document.is_active defaults
+to True when the field is NULL).
+
 Re-running this script recomputes the full match set from scratch and
 replaces all previously auto-generated rows (auto_confirmed/pending_review)
 - it never touches rows a human has already reviewed via the dashboard
@@ -53,6 +67,8 @@ def main() -> None:
         extractions_by_doc = {
             row.document_id: row for row in session.scalars(select(DocumentExtraction))
         }
+        all_documents = session.scalars(select(Document)).all()
+        inactive_count = sum(1 for d in all_documents if not d.is_active)
         doc_meta = {
             d.id: DocumentMeta(
                 company_id=d.company_id,
@@ -64,14 +80,22 @@ def main() -> None:
                 coverage_name=(
                     extractions_by_doc[d.id].coverage_name if d.id in extractions_by_doc else None
                 ),
+                is_active=d.is_active,
             )
-            for d in session.scalars(select(Document))
+            for d in all_documents
         }
         protected_ids = set(
             session.scalars(
                 select(DocumentMatch.id).where(DocumentMatch.status.in_(_HUMAN_REVIEWED_STATUSES))
             )
         )
+
+    logger.info(
+        "%d documents total, %d of them inactive/superseded (still eligible as a match SOURCE, "
+        "never as a candidate - see module docstring).",
+        len(all_documents),
+        inactive_count,
+    )
 
     if not embeddings_by_doc:
         logger.info("No embeddings yet - nothing to match.")

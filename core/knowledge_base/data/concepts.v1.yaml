@@ -1,0 +1,121 @@
+# Insurance concept/synonym dictionary - v1
+#
+# Broader than canonical_codes.v1.yaml: structural insurance concepts
+# (periods, benefit mechanics, definitions) rather than set-membership
+# codes, plus explicit related_concepts links. Used to help both
+# extraction-prompt hints and canonical-profile normalization recognize
+# that wildly different phrasings are the same idea - synonym variants
+# below are drawn from real spelling/phrasing variants observed in the
+# live corpus (e.g. "אובדן כושר עבודה" spelled 3+ different ways across
+# companies), not invented.
+version: v1
+concepts:
+  - concept_id: WAITING_PERIOD
+    name_he: תקופת המתנה
+    synonyms: [תקופת המתנה]
+    related_concepts: [QUALIFYING_PERIOD, SURVIVAL_PERIOD]
+    definition_he: פרק הזמן שבין קרות מקרה הביטוח לבין תחילת הזכאות לתגמול.
+
+  - concept_id: QUALIFYING_PERIOD
+    name_he: תקופת אכשרה
+    synonyms: [תקופת אכשרה]
+    related_concepts: [WAITING_PERIOD]
+    definition_he: פרק הזמן מתחילת הפוליסה שבמהלכו אירוע ביטוח אינו מזכה בתגמול (או מזכה בתנאים מוגבלים).
+
+  - concept_id: SURVIVAL_PERIOD
+    name_he: תקופת הישרדות
+    synonyms: [תקופת הישרדות, תנאי הישרדות]
+    related_concepts: [WAITING_PERIOD]
+    definition_he: פרק זמן שהמבוטח נדרש לשרוד לאחר קרות מקרה הביטוח כתנאי לזכאות לתגמול (נפוץ במחלות קשות).
+
+  - concept_id: DEDUCTIBLE
+    name_he: השתתפות עצמית
+    synonyms: [השתתפות עצמית, פרנצ'יזה]
+    related_concepts: [MAXIMUM_BENEFIT]
+    definition_he: הסכום/החלק מההוצאה שהמבוטח נושא בו בעצמו לפני תשלום התגמול.
+
+  - concept_id: MAXIMUM_BENEFIT
+    name_he: תקרת תגמול
+    synonyms: [תקרה, סכום מרבי, גבול אחריות]
+    related_concepts: [DEDUCTIBLE, INSURANCE_AMOUNT]
+    definition_he: הסכום המרבי שהמבטח ישלם בגין מקרה ביטוח/תקופת ביטוח.
+
+  - concept_id: INSURANCE_AMOUNT
+    name_he: סכום ביטוח
+    synonyms: [סכום ביטוח, סכום הפיצוי]
+    related_concepts: [MAXIMUM_BENEFIT]
+    definition_he: הסכום הקבוע/הבסיסי עליו מוסכם בפוליסה, ממנו נגזר בפועל התגמול.
+
+  - concept_id: LOSS_OF_WORK_CAPACITY
+    name_he: אובדן כושר עבודה
+    synonyms:
+      [
+        אובדן כושר עבודה,
+        אבדן כושר עבודה,
+        איבוד כושר עבודה,
+        אובדן כושר,
+        אי כושר עבודה,
+        אובדן מוחלט של כושר העבודה,
+      ]
+    related_concepts: [TOTAL_DISABILITY, PARTIAL_DISABILITY]
+    definition_he: מצב שבו המבוטח אינו מסוגל לעסוק בעיסוקו (או בכל עיסוק סביר) עקב מחלה/תאונה.
+
+  - concept_id: TOTAL_DISABILITY
+    name_he: נכות מלאה
+    synonyms: [נכות מלאה ותמידית, נכות מוחלטת ותמידית, נכות מלאה וצמיתה]
+    related_concepts: [PARTIAL_DISABILITY, LOSS_OF_WORK_CAPACITY]
+    definition_he: מצב נכות המזכה בתגמול מלא לפי הפוליסה.
+
+  - concept_id: PARTIAL_DISABILITY
+    name_he: נכות חלקית
+    synonyms: [אובדן כושר עבודה חלקי, נכות חלקית]
+    related_concepts: [TOTAL_DISABILITY, LOSS_OF_WORK_CAPACITY]
+    definition_he: מצב נכות המזכה בתגמול יחסי/חלקי בלבד.
+
+  - concept_id: NURSING_CARE
+    name_he: סיעוד
+    synonyms: [סיעוד, טיפול סיעודי, מצב סיעודי, תגמול סיעודי]
+    related_concepts: [ADL]
+    definition_he: מצב בו המבוטח תלוי בעזרת הזולת בביצוע פעולות יומיום.
+
+  - concept_id: ADL
+    name_he: פעולות יומיום
+    synonyms: [ADL, פעולות אדל, פעולות יום-יום]
+    related_concepts: [NURSING_CARE]
+    definition_he: "Activities of Daily Living - קבוצת הפעולות הבסיסיות (ניידות, לבוש, רחצה וכד') המשמשות למדידת מצב סיעודי."
+
+  - concept_id: CRITICAL_ILLNESS
+    name_he: מחלות קשות
+    synonyms: [מחלות קשות, מחלה קשה, מחלת קשות, מחלות קשות ואירועים רפואיים חמורים]
+    related_concepts: [SURVIVAL_PERIOD]
+    definition_he: קבוצת מחלות/מצבים רפואיים חמורים המזכים בפיצוי לפי רשימה סגורה מוגדרת בפוליסה.
+
+  - concept_id: LUMP_SUM
+    name_he: פיצוי חד-פעמי
+    synonyms: [סכום חד פעמי, תגמול חד פעמי]
+    related_concepts: [REIMBURSEMENT, MONTHLY_ANNUITY]
+    definition_he: תשלום בסכום קבוע במכה אחת עם קרות מקרה הביטוח, ללא זיקה להוצאה בפועל.
+
+  - concept_id: REIMBURSEMENT
+    name_he: שיפוי
+    synonyms: [שיפוי, החזר הוצאות]
+    related_concepts: [LUMP_SUM]
+    definition_he: תשלום כנגד הוצאה שהמבוטח הוציא בפועל, עד לתקרה.
+
+  - concept_id: MONTHLY_ANNUITY
+    name_he: פיצוי חודשי/קצבה
+    synonyms: [פיצוי חודשי, תגמול חודשי, גמלה חודשית, קצבה]
+    related_concepts: [LUMP_SUM]
+    definition_he: תשלום תקופתי (בדרך כלל חודשי) הממשיך כל עוד מתקיים מצב הזכאות.
+
+  - concept_id: PREMIUM_WAIVER
+    name_he: שחרור מתשלום פרמיות
+    synonyms: [שחרור מתשלום פרמיה, שחרור מתשלום פרמיות]
+    related_concepts: [LOSS_OF_WORK_CAPACITY]
+    definition_he: פטור מתשלום פרמיות הפוליסה בהתקיים תנאי מסוים (בד"כ אובדן כושר עבודה).
+
+  - concept_id: PRE_EXISTING_CONDITION
+    name_he: מצב רפואי קודם
+    synonyms: [מצב רפואי קודם, מחלה קודמת, מצב קיים מראש]
+    related_concepts: [QUALIFYING_PERIOD]
+    definition_he: מצב רפואי שהיה קיים למבוטח טרם ההצטרפות לביטוח/טרם תום תקופת האכשרה.

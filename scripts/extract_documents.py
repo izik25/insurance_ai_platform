@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from openai import OpenAI  # noqa: E402
 from sqlalchemy import select  # noqa: E402
+from sqlalchemy.exc import IntegrityError  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from core.config.settings import Settings, get_settings  # noqa: E402
@@ -113,9 +114,19 @@ def _run_chunk(client: OpenAI, model: str, texts: dict[str, str]) -> tuple[int, 
             survival_period=extraction.survival_period,
             raw_extraction=extraction.model_dump(),
         )
-        with session_scope() as session:
-            session.merge(row)
-            _backfill_appendix_metadata(session, document_id, extraction)
+        try:
+            with session_scope() as session:
+                session.merge(row)
+                _backfill_appendix_metadata(session, document_id, extraction)
+        except IntegrityError as exc:
+            # A batch has occasionally been observed to yield two results for
+            # the same document_id (root cause not pinned down - possibly a
+            # retried request within the batch); document_id is unique, so
+            # the second merge collides. Don't let one bad row abort the rest
+            # of an otherwise-good 100-document chunk.
+            logger.warning("Skipping duplicate extraction result for %s: %s", document_id, exc)
+            failed += 1
+            continue
         saved += 1
 
     return saved, failed

@@ -18,6 +18,27 @@ documents" grouping plus a full historical-editions list) - deduplicated
 here by href, keeping the first title seen (the two copies were confirmed
 identical whenever both were present).
 
+Unlike Harel/Clal/Direct Insurance/Migdal, no structured validity-date
+field exists anywhere on this site - the closest signal is embedded in the
+title text itself, e.g. "... בתוקף החל מ 02.2024" (start only) or "... בתוקף
+החל מ- 09.2023 ועד ל- 31.01.2024" (start+end) - parsed by
+marketing_dates_from_title below. This is best-effort, NOT a reliable
+active/historical split, confirmed live (2026-08-10):
+- Only ~74% of real titles are cleanly regex-parseable as digit dates at
+  all (DD.MM.YYYY / MM.YYYY / D.M.YY / D.M.YYYY, mixed within the same
+  page); a further ~11% use Hebrew month names ("בתוקף מאוקטובר 17") with
+  no digits at all - not handled here, left with no marketing dates.
+- The page has a genuine "מהדורות קודמות" (previous editions) section
+  distinct from the current-documents section (confirmed live via a
+  `hide`-classed wrapper div), and at least one confirmed-superseded
+  document in that section has NO end date in its title at all - so
+  "title has no עד" must NOT be read as proof of "currently active", only
+  as "no evidence either way" (same accepted-gap posture as everywhere
+  else "no signal" means "active by default"). `refs_from_page_html`
+  does not currently distinguish that section from the current one -
+  fixing that would need a genuinely different HTML-traversal strategy,
+  deliberately not attempted here.
+
 Critical illness ("Extra Care"/מחלות קשות) has no page of its own: its
 documents already appear on both the health and life pages (confirmed live,
 different media IDs even for the same effective date - likely a separate
@@ -35,8 +56,10 @@ project already extends to Clal's two overlapping company entities.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -68,6 +91,14 @@ class AigDocumentRef:
     title: str
     appendix_numbers: list[str]
     download_url: str
+    marketing_start_date: date | None = None  # best-effort, from title text - see module docstring
+    marketing_end_date: date | None = None  # ditto - absence does NOT mean "active", just "unknown"
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
@@ -84,6 +115,38 @@ class AigDocumentRef:
         prefix = f"{media_id}_"
         keep = _MAX_FILENAME_LENGTH - len(prefix) - len(ext)
         return f"{prefix}{stem[:keep]}{ext}"
+
+
+_DATE_TOKEN = r"\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\.\d{4}"
+_START_DATE_PATTERN = re.compile(rf"(?:בתוקף\s+)?(?:החל\s+)?מ-?\s*({_DATE_TOKEN})")
+_END_DATE_PATTERN = re.compile(rf"עד\s*ל?-?\s*({_DATE_TOKEN})")
+
+
+def _parse_title_date(text: str) -> date | None:
+    """Parse one "D.M.YYYY" / "D.M.YY" / "M.YYYY" token from title text."""
+    parts = text.split(".")
+    try:
+        if len(parts) == 2:
+            month, year = int(parts[0]), int(parts[1])
+            return date(year, month, 1)
+        if len(parts) == 3:
+            day, month, year_str = int(parts[0]), int(parts[1]), parts[2]
+            year = int(year_str) if len(year_str) == 4 else 2000 + int(year_str)
+            return date(year, month, day)
+    except ValueError:
+        pass
+    logger.warning("AIG: unparseable title date %r", text)
+    return None
+
+
+def marketing_dates_from_title(title: str) -> tuple[date | None, date | None]:
+    """Best-effort (start, end) extraction from title text - see module
+    docstring for the real-world coverage/reliability caveats."""
+    start_match = _START_DATE_PATTERN.search(title)
+    end_match = _END_DATE_PATTERN.search(title)
+    start = _parse_title_date(start_match.group(1)) if start_match else None
+    end = _parse_title_date(end_match.group(1)) if end_match else None
+    return start, end
 
 
 def refs_from_page_html(domain: str, html: str) -> list[AigDocumentRef]:
@@ -106,12 +169,15 @@ def refs_from_page_html(domain: str, html: str) -> list[AigDocumentRef]:
         seen_urls.add(url)
 
         title = anchor.get_text(" ", strip=True)
+        start_date, end_date = marketing_dates_from_title(title)
         refs.append(
             AigDocumentRef(
                 domain=domain,
                 title=title,
                 appendix_numbers=find_appendix_numbers(title),
                 download_url=url,
+                marketing_start_date=start_date,
+                marketing_end_date=end_date,
             )
         )
 

@@ -117,6 +117,7 @@ def _load_data() -> tuple[
             appendix_name=d.appendix_name,
             coverage_type=extraction.coverage_type if extraction else None,
             coverage_name=extraction.coverage_name if extraction else None,
+            is_active=d.is_active,
         )
         judge_info[d.id] = DocumentJudgeInfo(
             company_id=d.company_id,

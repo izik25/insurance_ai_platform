@@ -1,0 +1,313 @@
+# Canonical Codes dictionary - v1
+#
+# Normalizes free-text phrases (from PolicyExtraction fields, question-bank
+# answers, and canonical-profile text) into fixed internal codes so
+# different companies' different wordings map to the same value. Consumed
+# by core/knowledge_base/registry.normalize_to_code() (rule-based substring
+# match first; unmatched phrases fall back to a small LLM-assisted batch,
+# see core/canonical/code_normalizer.py in Phase 2).
+#
+# `disease`-derived insured_event codes are grounded directly in the live
+# disease_list frequency table (data/processed/taxonomy_analysis/
+# disease_list_frequencies.json) - the single most standardized closed
+# vocabulary found in the corpus (e.g. סרטן=491, שבץ מוחי=443, טרשת
+# נפוצה=312, עיוורון=283, אי ספיקת כליות כרונית=227, ...).
+version: v1
+codes:
+  # ---------------------------------------------------- insured_event: critical-illness diseases
+  - code: CANCER
+    code_category: insured_event
+    canonical_name_he: סרטן
+    synonyms: [מחלת הסרטן, מחלת סרטן, גילוי מחלת סרטן, פיצוי לסרטן]
+  - code: STROKE
+    code_category: insured_event
+    canonical_name_he: שבץ מוחי
+    synonyms: [אירוע מוחי, CVA, תאונה מוחית]
+  - code: MULTIPLE_SCLEROSIS
+    code_category: insured_event
+    canonical_name_he: טרשת נפוצה
+    synonyms: []
+  - code: BLINDNESS
+    code_category: insured_event
+    canonical_name_he: עיוורון
+    synonyms: [אובדן ראייה]
+  - code: CHRONIC_RENAL_FAILURE
+    code_category: insured_event
+    canonical_name_he: אי ספיקת כליות כרונית
+    synonyms: [אי ספיקת כליות]
+  - code: PARKINSONS_DISEASE
+    code_category: insured_event
+    canonical_name_he: פרקינסון
+    synonyms: [מחלת פרקינסון]
+  - code: HEART_ATTACK
+    code_category: insured_event
+    canonical_name_he: התקף לב
+    synonyms: [אוטם שריר הלב, אירוע לב]
+  - code: PARALYSIS
+    code_category: insured_event
+    canonical_name_he: שיתוק
+    synonyms: []
+  - code: DEAFNESS
+    code_category: insured_event
+    canonical_name_he: חירשות
+    synonyms: [אובדן שמיעה]
+  - code: FULMINANT_LIVER_FAILURE
+    code_category: insured_event
+    canonical_name_he: אי ספיקת כבד פולמיננטית
+    synonyms: [אי ספיקת כבד חריפה]
+  - code: ORGAN_TRANSPLANT
+    code_category: insured_event
+    canonical_name_he: השתלת איברים
+    synonyms: [השתלת איבר, השתלות]
+  - code: TOTAL_PERMANENT_DISABILITY
+    code_category: insured_event
+    canonical_name_he: נכות מלאה ותמידית
+    synonyms: [נכות מוחלטת ותמידית, נכות מלאה וצמיתה]
+  - code: LIMB_LOSS
+    code_category: insured_event
+    canonical_name_he: איבוד גפיים
+    synonyms: [קטיעת גפיים]
+  - code: SEVERE_BURNS
+    code_category: insured_event
+    canonical_name_he: כוויות קשות
+    synonyms: []
+  - code: COMA
+    code_category: insured_event
+    canonical_name_he: תרדמת
+    synonyms: [מצב תרדמת]
+  - code: ALZHEIMERS_DISEASE
+    code_category: insured_event
+    canonical_name_he: אלצהיימר
+    synonyms: [מחלת אלצהיימר]
+  - code: AIDS
+    code_category: insured_event
+    canonical_name_he: איידס
+    synonyms: [AIDS, מחלת איידס]
+  - code: BENIGN_BRAIN_TUMOR
+    code_category: insured_event
+    canonical_name_he: גידול שפיר במוח
+    synonyms: []
+  - code: INCURABLE_DISEASE
+    code_category: insured_event
+    canonical_name_he: מחלה חשוכת מרפא
+    synonyms: []
+
+  # ---------------------------------------------------- insured_event: other main events
+  - code: DEATH
+    code_category: insured_event
+    canonical_name_he: מקרה מוות
+    synonyms: [פטירת המבוטח, מקרה פטירה]
+  - code: ACCIDENTAL_DEATH
+    code_category: insured_event
+    canonical_name_he: מוות מתאונה
+    synonyms: [מוות כתוצאה מתאונה, מקרה מוות מתאונה]
+  - code: ACCIDENT
+    code_category: insured_event
+    canonical_name_he: תאונה
+    synonyms: [אירוע תאונתי]
+  - code: TOTAL_LOSS_OF_WORK_CAPACITY
+    code_category: insured_event
+    canonical_name_he: אובדן כושר עבודה מוחלט
+    synonyms: [איבוד מוחלט של כושר העבודה, אובדן מוחלט ותמידי של כושר העבודה]
+  - code: PARTIAL_LOSS_OF_WORK_CAPACITY
+    code_category: insured_event
+    canonical_name_he: אובדן כושר עבודה חלקי
+    synonyms: []
+  - code: ACCIDENTAL_DISABILITY
+    code_category: insured_event
+    canonical_name_he: נכות מתאונה
+    synonyms: [נכות עקב תאונה, נכות כתוצאה מתאונה]
+  - code: SURGERY
+    code_category: insured_event
+    canonical_name_he: ניתוח
+    synonyms: [אשפוז עקב ניתוח]
+  - code: NURSING_CONDITION
+    code_category: insured_event
+    canonical_name_he: מצב סיעודי
+    synonyms: [תשות]
+
+  # -------------------------------------------------------- covered_event
+  - code: SURGERY_ISRAEL
+    code_category: covered_event
+    canonical_name_he: ניתוחים בישראל
+    synonyms: [ניתוחים מהשקל הראשון, ניתוחים משלים שב"ן]
+  - code: SURGERY_ABROAD
+    code_category: covered_event
+    canonical_name_he: ניתוחים בחו"ל
+    synonyms: [ניתוח בינלאומי, ניתוחים פרטיים בחו"ל]
+  - code: SURGERY_ALTERNATIVE_TREATMENT
+    code_category: covered_event
+    canonical_name_he: טיפול מחליף ניתוח
+    synonyms: [טיפולים מחליפי ניתוח]
+  - code: TRANSPLANT_ABROAD
+    code_category: covered_event
+    canonical_name_he: השתלות וטיפולים מיוחדים בחו"ל
+    synonyms: []
+  - code: MEDICATION_OUTSIDE_BASKET
+    code_category: covered_event
+    canonical_name_he: תרופות מחוץ לסל הבריאות
+    synonyms: [תרופות שאינן כלולות בסל הבריאות, תרופות מיוחדות]
+  - code: AMBULATORY_SERVICE
+    code_category: covered_event
+    canonical_name_he: שירות אמבולטורי
+    synonyms: [שירותים רפואיים אמבולטוריים, טכנולוגיות מתקדמות ברפואה]
+  - code: DIAGNOSTIC_TEST
+    code_category: covered_event
+    canonical_name_he: בדיקה אבחנתית
+    synonyms: [שירותי אבחון רפואיים, בדיקות סקר רפואיות]
+  - code: MEDICAL_CONSULTATION
+    code_category: covered_event
+    canonical_name_he: ייעוץ רפואי
+    synonyms: [ייעוץ רפואי מקוון, ליווי רפואי אישי]
+  - code: DENTAL_TREATMENT
+    code_category: covered_event
+    canonical_name_he: טיפול שיניים
+    synonyms: []
+  - code: COMPLEMENTARY_MEDICINE_TREATMENT
+    code_category: covered_event
+    canonical_name_he: טיפול רפואה משלימה
+    synonyms: [רפואה אלטרנטיבית]
+  - code: MONTHLY_DISABILITY_PAYMENT
+    code_category: covered_event
+    canonical_name_he: פיצוי חודשי באובדן כושר עבודה
+    synonyms: []
+  - code: PREMIUM_WAIVER
+    code_category: covered_event
+    canonical_name_he: שחרור מתשלום פרמיות
+    synonyms: [שחרור מתשלום פרמיה]
+
+  # ---------------------------------------------------------- exclusion
+  - code: PRE_EXISTING_CONDITION
+    code_category: exclusion
+    canonical_name_he: מצב רפואי קודם
+    synonyms: [מחלה קודמת, מצב קיים מראש]
+  - code: SELF_INFLICTED_INJURY
+    code_category: exclusion
+    canonical_name_he: פגיעה עצמית מכוונת
+    synonyms: [ניסיון התאבדות, פגיעה עצמית]
+  - code: WAR_OR_TERROR
+    code_category: exclusion
+    canonical_name_he: מלחמה או פעולת איבה
+    synonyms: [פעולות טרור]
+  - code: EXTREME_SPORTS
+    code_category: exclusion
+    canonical_name_he: ספורט אתגרי/מסוכן
+    synonyms: [ספורט אתגרי]
+  - code: ALCOHOL_OR_DRUGS
+    code_category: exclusion
+    canonical_name_he: השפעת אלכוהול או סמים
+    synonyms: []
+  - code: COSMETIC_TREATMENT
+    code_category: exclusion
+    canonical_name_he: טיפול אסתטי
+    synonyms: [ניתוח אסתטי]
+  - code: EXPERIMENTAL_TREATMENT
+    code_category: exclusion
+    canonical_name_he: טיפול ניסיוני
+    synonyms: []
+  - code: MENTAL_ILLNESS
+    code_category: exclusion
+    canonical_name_he: מחלת נפש
+    synonyms: []
+  - code: CRIMINAL_ACT
+    code_category: exclusion
+    canonical_name_he: מעשה פלילי
+    synonyms: [עבירה פלילית]
+  - code: EARLY_STAGE_DISEASE
+    code_category: exclusion
+    canonical_name_he: מצב מוקדם/מוחרג של המחלה
+    synonyms: [שלב מוקדם]
+
+  # -------------------------------------------------------------- eligibility
+  - code: MINIMUM_ENTRY_AGE
+    code_category: eligibility
+    canonical_name_he: גיל כניסה מינימלי
+    synonyms: []
+  - code: MAXIMUM_ENTRY_AGE
+    code_category: eligibility
+    canonical_name_he: גיל כניסה מקסימלי
+    synonyms: []
+  - code: ISRAELI_RESIDENT_REQUIRED
+    code_category: eligibility
+    canonical_name_he: תושב ישראל
+    synonyms: []
+  - code: ACTIVE_EMPLOYMENT_REQUIRED
+    code_category: eligibility
+    canonical_name_he: עובד פעיל
+    synonyms: [עיסוק סדיר]
+  - code: HEALTH_DECLARATION_REQUIRED
+    code_category: eligibility
+    canonical_name_he: הצהרת בריאות
+    synonyms: [חיתום רפואי]
+
+  # -------------------------------------------------------------- definition
+  - code: DEFINITION_TOTAL_DISABILITY
+    code_category: definition
+    canonical_name_he: הגדרת נכות מלאה
+    synonyms: []
+  - code: DEFINITION_PARTIAL_DISABILITY
+    code_category: definition
+    canonical_name_he: הגדרת נכות חלקית
+    synonyms: []
+  - code: DEFINITION_OWN_OCCUPATION
+    code_category: definition
+    canonical_name_he: אי-כושר לעיסוק ספציפי
+    synonyms: [מקצוע ספציפי, עיסוק סביר]
+  - code: DEFINITION_ADL
+    code_category: definition
+    canonical_name_he: פעולות יומיום (ADL)
+    synonyms: [פעולות אדל]
+
+  # ------------------------------------------------------- claim_requirement
+  - code: MEDICAL_REPORT_REQUIRED
+    code_category: claim_requirement
+    canonical_name_he: דוח רפואי נדרש
+    synonyms: [אישור רופא, מסמכים רפואיים]
+  - code: POLICE_REPORT_REQUIRED
+    code_category: claim_requirement
+    canonical_name_he: דוח משטרה נדרש
+    synonyms: []
+  - code: CLAIM_SUBMISSION_DEADLINE
+    code_category: claim_requirement
+    canonical_name_he: מועד הגשת תביעה
+    synonyms: [תוך זמן קצוב]
+  - code: ORIGINAL_RECEIPTS_REQUIRED
+    code_category: claim_requirement
+    canonical_name_he: קבלות מקוריות נדרשות
+    synonyms: []
+
+  # ------------------------------------------------------------- extension
+  - code: WORLDWIDE_COVERAGE_EXTENSION
+    code_category: extension
+    canonical_name_he: הרחבה לכיסוי עולמי
+    synonyms: []
+  - code: FAMILY_MEMBER_EXTENSION
+    code_category: extension
+    canonical_name_he: הרחבה לבני משפחה
+    synonyms: []
+  - code: CHILDREN_EXTENSION
+    code_category: extension
+    canonical_name_he: הרחבה לילדים
+    synonyms: [נספח שירותים לילד]
+  - code: INFLATION_LINKED_EXTENSION
+    code_category: extension
+    canonical_name_he: הצמדה למדד
+    synonyms: [צמוד מדד]
+
+  # ---------------------------------------------------------- benefit_type
+  - code: LUMP_SUM
+    code_category: benefit_type
+    canonical_name_he: פיצוי חד-פעמי
+    synonyms: [סכום חד פעמי, תגמול חד פעמי]
+  - code: REIMBURSEMENT
+    code_category: benefit_type
+    canonical_name_he: שיפוי
+    synonyms: [החזר הוצאות]
+  - code: MONTHLY_ANNUITY
+    code_category: benefit_type
+    canonical_name_he: פיצוי/קצבה חודשית
+    synonyms: [תגמול חודשי, גמלה חודשית]
+  - code: IN_KIND_SERVICE
+    code_category: benefit_type
+    canonical_name_he: שירות בעין
+    synonyms: [מתן שירות]

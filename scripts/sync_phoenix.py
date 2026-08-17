@@ -25,7 +25,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from companies.phoenix import register  # noqa: E402
-from companies.phoenix.downloader import PhoenixDocumentRef, PhoenixDownloader  # noqa: E402
+from companies.phoenix.downloader import (  # noqa: E402
+    PhoenixDocumentRef,
+    PhoenixDownloader,
+    with_marketing_dates,
+)
 from core.config.settings import get_settings  # noqa: E402
 from core.database.models import Company, Document  # noqa: E402
 from core.database.session import init_db, session_scope  # noqa: E402
@@ -85,6 +89,11 @@ def main() -> None:
         _save_listing_cache(cache_path, refs)
         logger.info("Listed %d documents (cached to %s)", len(refs), cache_path)
 
+    # Derived from `edition` here rather than persisted in the cache - see
+    # companies/phoenix/downloader.py's module docstring - so this is always
+    # freshly (re)computed, cached listing or not.
+    refs = with_marketing_dates(refs)
+
     saved_paths = plugin.downloader.download_all(destination, limit=args.limit, refs=refs)
     logger.info("Downloaded/verified %d files on disk", len(saved_paths))
 
@@ -117,6 +126,8 @@ def main() -> None:
             appendix_number=[ref.appendix_number] if ref.appendix_number else [],
             appendix_name=ref.title,
             department_name=None,
+            marketing_start_date=ref.marketing_start_date,
+            marketing_end_date=ref.marketing_end_date,
             pages_count=None,
             extraction_method="manual",
         )

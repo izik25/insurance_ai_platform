@@ -4,6 +4,7 @@ a mocked HTTP transport with `list_documents` monkeypatched."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -14,6 +15,7 @@ from companies.phoenix.downloader import (
     _NO_RESULTS_MARKER,
     PhoenixDocumentRef,
     PhoenixDownloader,
+    with_marketing_dates,
 )
 
 
@@ -313,3 +315,78 @@ def test_download_all_does_not_retry_permanent_404(tmp_path: Path) -> None:
 
     assert attempts["count"] == 1
     assert saved == []
+
+
+def test_with_marketing_dates_newest_edition_has_no_end_date() -> None:
+    refs = [
+        PhoenixDocumentRef("health", "old", "6975", "01/24", "http://x/old.pdf"),
+        PhoenixDocumentRef("health", "new", "6975", "05/26", "http://x/new.pdf"),
+    ]
+
+    result = with_marketing_dates(refs)
+
+    by_title = {r.title: r for r in result}
+    assert by_title["new"].marketing_start_date == date(2026, 5, 1)
+    assert by_title["new"].marketing_end_date is None
+
+
+def test_with_marketing_dates_older_edition_ends_before_the_next() -> None:
+    refs = [
+        PhoenixDocumentRef("health", "old", "6975", "01/24", "http://x/old.pdf"),
+        PhoenixDocumentRef("health", "new", "6975", "05/26", "http://x/new.pdf"),
+    ]
+
+    result = with_marketing_dates(refs)
+
+    by_title = {r.title: r for r in result}
+    assert by_title["old"].marketing_start_date == date(2024, 1, 1)
+    assert by_title["old"].marketing_end_date == date(2026, 4, 30)
+
+
+def test_with_marketing_dates_nispach_gilui_pair_shares_active_edition() -> None:
+    """Two files, same appendix + same (highest) edition - both active, not
+    one superseding the other."""
+    refs = [
+        PhoenixDocumentRef("health", "nispach", "6975", "05/26", "http://x/nispach.pdf"),
+        PhoenixDocumentRef("health", "gilui", "6975", "05/26", "http://x/gilui.pdf"),
+    ]
+
+    result = with_marketing_dates(refs)
+
+    assert all(r.marketing_end_date is None for r in result)
+    assert all(r.is_active for r in result)
+
+
+def test_with_marketing_dates_different_appendix_numbers_are_independent() -> None:
+    refs = [
+        PhoenixDocumentRef("health", "a-old", "100", "01/20", "http://x/a-old.pdf"),
+        PhoenixDocumentRef("health", "b-only", "200", "01/20", "http://x/b-only.pdf"),
+    ]
+
+    result = with_marketing_dates(refs)
+
+    by_title = {r.title: r for r in result}
+    # Different appendix numbers never supersede each other, even with the
+    # same edition - "b-only" is the only (and therefore active) entry in
+    # its own group.
+    assert by_title["a-old"].marketing_end_date is None
+    assert by_title["b-only"].marketing_end_date is None
+
+
+def test_with_marketing_dates_missing_appendix_number_stays_ungrouped() -> None:
+    refs = [PhoenixDocumentRef("health", "x", "", "01/20", "http://x/x.pdf")]
+
+    result = with_marketing_dates(refs)
+
+    assert result[0].marketing_start_date is None
+    assert result[0].marketing_end_date is None
+    assert result[0].is_active is True
+
+
+def test_with_marketing_dates_unparseable_edition_stays_ungrouped() -> None:
+    refs = [PhoenixDocumentRef("health", "x", "100", "not-an-edition", "http://x/x.pdf")]
+
+    result = with_marketing_dates(refs)
+
+    assert result[0].marketing_start_date is None
+    assert result[0].marketing_end_date is None

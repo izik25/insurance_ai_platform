@@ -1,0 +1,218 @@
+# Question Bank - v1
+#
+# base_questions apply to every document, regardless of category, and
+# complement PolicyExtraction/DocumentExtraction (core/extraction/schema.py)
+# rather than duplicating it - e.g. PolicyExtraction already has a plain
+# `exclusions: list[str]` field; question Q04 here asks for the same
+# concept but as a structured FOUND/NOT_FOUND/AMBIGUOUS answer with
+# evidence + page, which the existing field cannot express.
+#
+# category_questions are keyed by taxonomy category_id (core/taxonomy/data/
+# taxonomy.v1.yaml) and are asked IN ADDITION to base_questions for
+# documents classified into that category. Only categories with real,
+# distinguishing sub-questions get an entry - categories without one still
+# get the full base set via get_questions_for_category().
+version: v1
+
+base_questions:
+  - question_id: base.insured_event
+    text_he: מהו מקרה הביטוח (האירוע שבקרותו קמה זכות לתגמול)?
+    expected_type: text
+  - question_id: base.covered_scope
+    text_he: מה בדיוק מכוסה במסגרת הנספח?
+    expected_type: text
+  - question_id: base.covered_events
+    text_he: מהם האירועים המכוסים?
+    expected_type: list
+  - question_id: base.exclusions
+    text_he: מהם החריגים?
+    expected_type: list
+  - question_id: base.limitations
+    text_he: מהם הסייגים (מגבלות שאינן חריגים מוחלטים)?
+    expected_type: list
+  - question_id: base.exceptions_to_exceptions
+    text_he: האם קיימים חריגים לחריגים (מקרים שבהם חריג מסוים אינו חל)?
+    expected_type: text
+  - question_id: base.eligibility_conditions
+    text_he: מהם תנאי הזכאות לכיסוי?
+    expected_type: text
+  - question_id: base.qualifying_period_exists
+    text_he: האם קיימת תקופת אכשרה?
+    expected_type: boolean
+  - question_id: base.qualifying_period_details
+    text_he: מה אורכה של תקופת האכשרה וממתי היא נספרת?
+    expected_type: text
+  - question_id: base.waiting_period_exists
+    text_he: האם קיימת תקופת המתנה?
+    expected_type: boolean
+  - question_id: base.waiting_period_details
+    text_he: מה אורכה של תקופת ההמתנה וממתי היא נספרת?
+    expected_type: text
+  - question_id: base.survival_period_exists
+    text_he: האם קיימת תקופת הישרדות?
+    expected_type: boolean
+  - question_id: base.survival_period_details
+    text_he: מה אורכה של תקופת ההישרדות?
+    expected_type: text
+  - question_id: base.benefit_type
+    text_he: מהו סוג התגמול (שיפוי, פיצוי חד-פעמי, פיצוי חודשי, שירות בעין)?
+    expected_type: enum
+  - question_id: base.benefit_calculation
+    text_he: כיצד מחושב התגמול?
+    expected_type: text
+  - question_id: base.insurance_amount_exists
+    text_he: האם קיים סכום ביטוח קבוע?
+    expected_type: boolean
+  - question_id: base.insurance_amount_details
+    text_he: מה סכום/י הביטוח?
+    expected_type: list
+  - question_id: base.cap_exists
+    text_he: האם קיימת תקרה לתגמול?
+    expected_type: boolean
+  - question_id: base.deductible_exists
+    text_he: האם קיימת השתתפות עצמית?
+    expected_type: boolean
+  - question_id: base.age_limitations
+    text_he: האם קיימות מגבלות גיל (הצטרפות/כניסה/סיום)?
+    expected_type: text
+  - question_id: base.claim_requirements
+    text_he: מהם תנאי התביעה (מסמכים/הליכים נדרשים להגשת תביעה)?
+    expected_type: list
+  - question_id: base.termination_conditions
+    text_he: מהם תנאי סיום הכיסוי?
+    expected_type: text
+  - question_id: base.extensions_exist
+    text_he: האם קיימות הרחבות לכיסוי הבסיסי?
+    expected_type: text
+  - question_id: base.special_definitions
+    text_he: האם קיימות הגדרות מיוחדות שמשנות את משמעות הכיסוי?
+    expected_type: text
+  - question_id: base.material_terms_not_in_schema
+    text_he: האם קיים תנאי מהותי בנספח שלא נכנס לאף שדה בסכמה הקיימת או בשאלות שלמעלה?
+    expected_type: text
+
+category_questions:
+  health.critical_illness.general:
+    - question_id: critical_illness.disease_definitions
+      text_he: מהי ההגדרה הרפואית/ביטוחית הנדרשת לכל אחת מהמחלות המכוסות?
+      expected_type: text
+    - question_id: critical_illness.repeat_compensation
+      text_he: האם ניתן לקבל פיצוי יותר מפעם אחת (למשל בגילוי מחלה נוספת מהרשימה)?
+      expected_type: boolean
+    - question_id: critical_illness.partial_states_covered
+      text_he: אילו מצבים חלקיים/מוקדמים (early-stage) מכוסים בפיצוי חלקי?
+      expected_type: list
+    - question_id: critical_illness.excluded_states
+      text_he: אילו מצבים רפואיים דומים מוחרגים במפורש (למשל שלבים מוקדמים שאינם מזכים)?
+      expected_type: list
+    - question_id: critical_illness.pre_existing_waiting
+      text_he: כיצד מטופל מצב שאובחן/החל בתוך תקופת האכשרה/ההמתנה?
+      expected_type: text
+
+  health.critical_illness.cancer:
+    - question_id: critical_illness.disease_definitions
+      text_he: מהי ההגדרה הרפואית/ביטוחית הנדרשת למחלת הסרטן המכוסה?
+      expected_type: text
+    - question_id: critical_illness.excluded_states
+      text_he: אילו סוגי/שלבי סרטן מוחרגים במפורש (למשל גידולים שפירים, סרטן עור שאינו מלנומה)?
+      expected_type: list
+    - question_id: critical_illness.repeat_compensation
+      text_he: האם ניתן לקבל פיצוי נוסף בהישנות המחלה?
+      expected_type: boolean
+
+  health.surgeries.israel:
+    - question_id: surgeries.definition
+      text_he: כיצד מוגדר "ניתוח" לצורך הכיסוי?
+      expected_type: text
+    - question_id: surgeries.types_covered
+      text_he: אילו סוגי ניתוחים מכוסים (רשימה סגורה/פתוחה)?
+      expected_type: list
+    - question_id: surgeries.reimbursement_or_indemnity
+      text_he: האם מדובר בשיפוי (לפי הוצאה בפועל) או בפיצוי (סכום קבוע)?
+      expected_type: enum
+    - question_id: surgeries.provider_restrictions
+      text_he: האם קיימת הגבלה לספקי שירות/רשת הסכמים?
+      expected_type: text
+    - question_id: surgeries.alternative_treatments
+      text_he: האם טיפולים מחליפי ניתוח מכוסים באותם תנאים?
+      expected_type: boolean
+
+  health.surgeries.overseas:
+    - question_id: surgeries.definition
+      text_he: כיצד מוגדר "ניתוח" לצורך הכיסוי?
+      expected_type: text
+    - question_id: surgeries.types_covered
+      text_he: אילו סוגי ניתוחים מכוסים בחו"ל?
+      expected_type: list
+    - question_id: surgeries.reimbursement_or_indemnity
+      text_he: האם מדובר בשיפוי או בפיצוי?
+      expected_type: enum
+    - question_id: surgeries.country_restrictions
+      text_he: האם קיימת הגבלה למדינות/מוסדות רפואיים מוכרים?
+      expected_type: text
+
+  health.surgeries.alternatives:
+    - question_id: surgeries.definition
+      text_he: כיצד מוגדר "טיפול מחליף ניתוח" לצורך הכיסוי?
+      expected_type: text
+    - question_id: surgeries.types_covered
+      text_he: אילו טיפולים מחליפי ניתוח מכוסים?
+      expected_type: list
+
+  health.medications:
+    - question_id: medications.definition
+      text_he: כיצד מוגדרת "תרופה מכוסה"?
+      expected_type: text
+    - question_id: medications.not_in_basket_required
+      text_he: האם נדרש שהתרופה לא תהיה כלולה בסל הבריאות הממלכתי?
+      expected_type: boolean
+    - question_id: medications.cap
+      text_he: מה התקרה השנתית/לתביעה לתרופות?
+      expected_type: text
+    - question_id: medications.deductible
+      text_he: האם קיימת השתתפות עצמית לתרופה?
+      expected_type: boolean
+    - question_id: medications.excluded_types
+      text_he: אילו סוגי תרופות/טיפולים מוחרגים במפורש?
+      expected_type: list
+
+  disability.loss_of_work_capacity:
+    - question_id: disability.definition
+      text_he: כיצד מוגדר "אובדן כושר עבודה" (מקצוע עיסוק ספציפי מול כל עיסוק סביר)?
+      expected_type: text
+    - question_id: disability.partial_vs_total
+      text_he: כיצד מבחינים בין אובדן כושר עבודה מלא לחלקי, ומה הפיצוי היחסי?
+      expected_type: text
+    - question_id: disability.occupation_class
+      text_he: האם קיימת חלוקה למקצועות (צווארון לבן/כחול) המשפיעה על התנאים?
+      expected_type: text
+    - question_id: disability.premium_waiver
+      text_he: האם קיים שחרור מתשלום פרמיות, ובאילו תנאים?
+      expected_type: boolean
+
+  long_term_care.general:
+    - question_id: nursing_care.definition
+      text_he: כיצד מוגדר "מצב סיעודי" (למשל אי-יכולת ביצוע פעולות יומיום, ADL)?
+      expected_type: text
+    - question_id: nursing_care.adl_count
+      text_he: כמה פעולות יומיום (ADL) נדרש לאבד כדי להיחשב סיעודי?
+      expected_type: number
+    - question_id: nursing_care.benefit_duration
+      text_he: מה משך תשלום התגמול הסיעודי (מוגבל בזמן/לכל החיים)?
+      expected_type: text
+
+  accidents.personal_accidents:
+    - question_id: accidents.definition
+      text_he: כיצד מוגדרת "תאונה" לצורך הכיסוי?
+      expected_type: text
+    - question_id: accidents.disability_scale
+      text_he: האם קיים לוח נכויות (טבלת אחוזי נכות) לפי סוג הפגיעה?
+      expected_type: boolean
+
+  service.medical_service:
+    - question_id: service.type
+      text_he: האם מדובר בשירות בעין (למשל ייעוץ/ליווי) או בזכות לשיפוי כספי?
+      expected_type: enum
+    - question_id: service.usage_limits
+      text_he: האם קיימת מגבלת שימוש (מספר פעמים/שנה, ערוצי פנייה)?
+      expected_type: text

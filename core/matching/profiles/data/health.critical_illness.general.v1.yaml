@@ -1,0 +1,78 @@
+# Matching profile for health.critical_illness.general - v1
+#
+# PROVISIONAL, informed by scripts/calibrate_matching.py's run over 154
+# pilot document_matches pairs (both sides classified health.critical_illness.*,
+# Migdal+Phoenix) - see match_calibration_runs for the full run record.
+#
+# CALIBRATION-QUALITY CAVEAT: the entire corpus has only 1 human-CONFIRMED
+# match and 0 REJECTED (out of ~16000 document_matches rows) - there is no
+# real labeled ground truth to learn weights from yet. What IS real: the
+# new canonical-code Jaccard signal separates the OLD pipeline's
+# auto_confirmed vs pending_review groups very cleanly -
+# insured_event_jaccard mean=0.637 (auto_confirmed, n=143) vs mean=0.018
+# (pending_review, n=11); avg_jaccard across all code categories 0.255 vs
+# 0.038. That's a strong directional signal that insured_event overlap
+# (which, for critical illness, is mostly disease-code overlap - CANCER,
+# STROKE, HEART_ATTACK, etc.) is the single most discriminating dimension
+# for this category - hence the higher weight below vs default.v1.yaml.
+# It does NOT prove either group is actually correct; weights should be
+# revisited once real human review (dashboard) produces confirmed/rejected
+# examples in this category, and thresholds should be revisited once
+# Phase 4's quantitative_score.py exists and its score distribution can be
+# observed on this pilot subset.
+version: v1
+category_id: health.critical_illness.general
+
+feature_weights:
+  - dimension: category
+    weight: 0.15
+    importance: CRITICAL
+  - dimension: coverage
+    weight: 0.05
+    importance: HIGH
+  - dimension: insured_event
+    weight: 0.30
+    importance: CRITICAL
+  - dimension: covered_events
+    weight: 0.15
+    importance: HIGH
+  - dimension: exclusions
+    weight: 0.10
+    importance: MEDIUM
+  - dimension: eligibility
+    weight: 0.05
+    importance: MEDIUM
+  - dimension: periods
+    weight: 0.05
+    importance: MEDIUM
+  - dimension: benefit
+    weight: 0.10
+    importance: HIGH
+  - dimension: definitions
+    weight: 0.05
+    importance: LOW
+
+hard_constraints:
+  - id: main_category_mismatch
+    description_he: main_category שונה לחלוטין פוסל התאמה.
+    rule: main_category_mismatch
+  - id: coverage_family_mismatch
+    description_he: coverage_family שונה מהותית (למשל לא CRITICAL_ILLNESS משני הצדדים) פוסל התאמה, אלא אם ב-alternative_categories.
+    rule: coverage_family_mismatch
+  - id: benefit_model_incompatible
+    description_he: benefit_model שונה באופן שאינו תואם פוסל התאמה.
+    rule: benefit_model_incompatible
+  - id: target_population_incompatible
+    description_he: target_population שונה באופן שאינו תואם פוסל התאמה.
+    rule: target_population_incompatible
+
+# Placeholder, unchanged from default.v1.yaml pending Phase 4's actual score
+# distribution on this pilot subset - do not treat as calibrated.
+thresholds:
+  auto_match: 0.90
+  deep_verification: 0.75
+  ambiguous: 0.60
+  reject: 0.60
+
+margin_rules:
+  min_margin_for_high_confidence: 0.05

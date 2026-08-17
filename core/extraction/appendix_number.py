@@ -15,6 +15,13 @@ the page:
   a printed "נספח 970-971").
 - An optional "מס'"/"מס׳"/"מס" ("no.") and/or stray punctuation between
   the word and the digits (confirmed: "נספח מס'-801-806/91").
+
+A third, structurally different shape (added 2026-08-13, confirmed live on
+~2011-2014-era Migdal documents): the number list comes *before* the
+keyword, parenthesized - e.g. "(1598 ,1597 ,1596 ,1595 ,1594) נספח ניתוחים
+בחו"ל" - one document covering plan numbers 1594-1598. Matched separately
+from the "after" shape above since the numbers, not the keyword, anchor
+the match here.
 """
 
 from __future__ import annotations
@@ -24,6 +31,9 @@ import re
 _CONNECTOR = r"[\s'\"׳-]*(?:מס['׳]?)?[\s'\"׳-]*"
 _APPENDIX_MENTION = re.compile(
     rf"(?:נספח|נטפח)(?:ים)?{_CONNECTOR}(\d+(?:\s*(?:,|ו-?|-)\s*\d+)*)"
+)
+_APPENDIX_MENTION_PARENTHESIZED = re.compile(
+    r"\((\d+(?:\s*,\s*\d+)*)\)\s*(?:נספח|נטפח|תוכנית)(?:ים)?"
 )
 _DIGITS = re.compile(r"\d+")
 
@@ -35,8 +45,9 @@ def find_appendix_numbers(text: str) -> list[str]:
     (common: the same appendix number footers every page) counts once.
     """
     numbers: list[str] = []
-    for mention in _APPENDIX_MENTION.finditer(text):
-        for number in _DIGITS.findall(mention.group(1)):
-            if number not in numbers:
-                numbers.append(number)
+    for pattern in (_APPENDIX_MENTION, _APPENDIX_MENTION_PARENTHESIZED):
+        for mention in pattern.finditer(text):
+            for number in _DIGITS.findall(mention.group(1)):
+                if number not in numbers:
+                    numbers.append(number)
     return numbers

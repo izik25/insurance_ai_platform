@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from companies.phoenix import register  # noqa: E402
-from companies.phoenix.downloader import PhoenixDownloader  # noqa: E402
+from companies.phoenix.downloader import PhoenixDownloader, with_marketing_dates  # noqa: E402
 from core.config.settings import get_settings  # noqa: E402
 from core.database.models import Company, Document  # noqa: E402
 from core.database.session import init_db, session_scope  # noqa: E402
@@ -40,7 +40,8 @@ def main() -> None:
     plugin = registry.get("phoenix")
     assert isinstance(plugin.downloader, PhoenixDownloader)
 
-    refs_by_filename = {ref.local_filename: ref for ref in plugin.downloader.list_documents()}
+    refs = with_marketing_dates(plugin.downloader.list_documents())
+    refs_by_filename = {ref.local_filename: ref for ref in refs}
 
     phoenix_dir = settings.raw_documents_dir / "phoenix"
     files = sorted(phoenix_dir.rglob("*.pdf"))
@@ -71,6 +72,8 @@ def main() -> None:
             appendix_number=[ref.appendix_number] if ref.appendix_number else [],
             appendix_name=ref.title,
             department_name=None,
+            marketing_start_date=ref.marketing_start_date,
+            marketing_end_date=ref.marketing_end_date,
             pages_count=None,
             extraction_method="manual",
         )

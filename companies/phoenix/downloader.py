@@ -14,13 +14,28 @@ Bot Control, which returns a bare 403 for default headless Chromium.
 Basic stealth (hiding navigator.webdriver, a normal desktop UA/locale) is
 enough to pass it — no CAPTCHA-solving or deeper fingerprint spoofing was
 needed. The PDF downloads themselves are plain HTTP, no browser required.
+
+Unlike Harel/Clal/Direct Insurance/Migdal, this site's `edition` column
+("מהדורה", MM/YY, e.g. "01/26") is not itself a start/end pair - it's a
+per-row version label, and the archive genuinely lists superseded editions
+of the same appendix side by side (confirmed live 2026-08-10: e.g. appendix
+6975/health has editions 05/26, 11/24, 04/24, 01/24 all listed at once,
+each with a paired "nispach"/"gilui" file sharing that edition - those two
+aren't duplicates to collapse, just two files for one version). So the
+validity window has to be *derived* by `with_marketing_dates` below,
+grouping by (domain, appendix_number): the highest-parsed-edition row(s)
+in a group are active (marketing_end_date=None), every older edition gets
+marketing_end_date set to just before the next-higher edition in its group
+- mirrors every other company's marketing_start_date/marketing_end_date
+without needing a real end-date field, which this site doesn't expose.
 """
 
 from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
@@ -70,6 +85,14 @@ class PhoenixDocumentRef:
     appendix_number: str
     edition: str
     download_url: str
+    marketing_start_date: date | None = None  # derived from `edition` by with_marketing_dates()
+    marketing_end_date: date | None = None  # ditto - None == still the active edition
+
+    @property
+    def is_active(self) -> bool:
+        """Mirrors Document.is_active - True whenever there's no end date at
+        all, or it hasn't passed yet."""
+        return self.marketing_end_date is None or self.marketing_end_date >= date.today()
 
     @property
     def local_filename(self) -> str:
@@ -90,6 +113,53 @@ class PhoenixDocumentRef:
         digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
         keep = _MAX_FILENAME_LENGTH - len(ext) - len(digest) - 1
         return f"{stem[:keep]}_{digest}{ext}"
+
+
+def _parse_edition(text: str) -> date | None:
+    """Parse the archive's "MM/YY" edition label into a sortable date (the
+    1st of that month) - unparseable/blank -> None."""
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        month_str, year_str = text.split("/", 1)
+        month = int(month_str)
+        year = 2000 + int(year_str)
+        return date(year, month, 1)
+    except (ValueError, IndexError):
+        logger.warning("Phoenix: unparseable edition %r", text)
+        return None
+
+
+def with_marketing_dates(refs: list[PhoenixDocumentRef]) -> list[PhoenixDocumentRef]:
+    """Derive marketing_start_date/marketing_end_date for every ref, grouped
+    by (domain, appendix_number) - see module docstring for why this has to
+    be derived from `edition` rather than read directly off the site.
+
+    Pure function so the grouping/derivation logic is testable directly,
+    independent of any crawl or cache I/O.
+    """
+    groups: dict[tuple[str, str], list[PhoenixDocumentRef]] = {}
+    ungroupable: list[PhoenixDocumentRef] = []
+    for ref in refs:
+        parsed = _parse_edition(ref.edition)
+        if not ref.appendix_number or parsed is None:
+            ungroupable.append(ref)  # no signal - stays active by default, same as elsewhere
+            continue
+        groups.setdefault((ref.domain, ref.appendix_number), []).append(ref)
+
+    result: list[PhoenixDocumentRef] = list(ungroupable)
+    for group_refs in groups.values():
+        distinct_dates = sorted({_parse_edition(r.edition) for r in group_refs})
+        next_date_by_date = dict(zip(distinct_dates, distinct_dates[1:] + [None], strict=False))
+        for ref in group_refs:
+            parsed = _parse_edition(ref.edition)
+            next_date = next_date_by_date[parsed]
+            end_date = next_date - timedelta(days=1) if next_date is not None else None
+            result.append(
+                replace(ref, marketing_start_date=parsed, marketing_end_date=end_date)
+            )
+    return result
 
 
 class PhoenixDownloader(BaseDownloader):

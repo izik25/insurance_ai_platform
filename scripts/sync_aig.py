@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -33,7 +34,24 @@ def _load_cached_listing(cache_path: Path) -> list[AigDocumentRef] | None:
     if not cache_path.is_file():
         return None
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
-    return [AigDocumentRef(**entry) for entry in raw]
+    return [
+        AigDocumentRef(
+            **{
+                **entry,
+                "marketing_start_date": (
+                    date.fromisoformat(entry["marketing_start_date"])
+                    if entry.get("marketing_start_date")
+                    else None
+                ),
+                "marketing_end_date": (
+                    date.fromisoformat(entry["marketing_end_date"])
+                    if entry.get("marketing_end_date")
+                    else None
+                ),
+            }
+        )
+        for entry in raw
+    ]
 
 
 def _save_listing_cache(cache_path: Path, refs: list[AigDocumentRef]) -> None:
@@ -43,6 +61,12 @@ def _save_listing_cache(cache_path: Path, refs: list[AigDocumentRef]) -> None:
             "title": ref.title,
             "appendix_numbers": ref.appendix_numbers,
             "download_url": ref.download_url,
+            "marketing_start_date": (
+                ref.marketing_start_date.isoformat() if ref.marketing_start_date else None
+            ),
+            "marketing_end_date": (
+                ref.marketing_end_date.isoformat() if ref.marketing_end_date else None
+            ),
         }
         for ref in refs
     ]
@@ -124,6 +148,8 @@ def main() -> None:
                 appendix_number=appendix_number,
                 appendix_name=ref.title or None,
                 department_name=None,
+                marketing_start_date=ref.marketing_start_date,
+                marketing_end_date=ref.marketing_end_date,
                 pages_count=None,
                 extraction_method="manual",
             )

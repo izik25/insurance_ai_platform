@@ -1,6 +1,8 @@
 # Enterprise Processing Platform — סקירת פרויקט
 
-מסמך זה מתעד את הארכיטקטורה, ההגדרות וההחלטות שהתקבלו עד כה, כדי שנוכל להמשיך ביעילות לשלב הפרונט ואז לחברות ביטוח נוספות בלי לאבד הקשר.
+מסמך זה מתעד את הארכיטקטורה, ההגדרות וההחלטות שהתקבלו עד כה — כולל למה כל החלטה התקבלה, לא רק מה הוחלט — כדי שאפשר יהיה להמשיך ביעילות לחברות ביטוח נוספות ולשלבים הבאים (matching, dashboard) בלי לאבד הקשר.
+
+גרסאות מקוצרות של מסמך זה: [OVERVIEW_SIMPLE.md](OVERVIEW_SIMPLE.md) (הסבר לא-טכני, שלב אחר שלב) ו-[OVERVIEW_TECH_SIMPLE.md](OVERVIEW_TECH_SIMPLE.md) (תמצית טכנית בטבלאות). לפירוט מלא ומעודכן של סכימת ה-DB (כל 14 הטבלאות, מי כותב למי, אחסון דיסק מול DB) ראו [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md).
 
 ## עקרון-על
 
@@ -27,7 +29,7 @@ insurance_ai_platform/
 │   ├── plugins/                 # base.py (ABCs), registry.py (CompanyRegistry)
 │   ├── storage/                 # base.py (ABC), local.py (LocalFileStorage)
 │   ├── utils/                   # hashing.py, logging.py
-│   ├── indexing/ llm/ rag/      # placeholder ריק — לא בשימוש, שולבו בפועל תחת extraction/embeddings/matching
+│   └── indexing/ llm/ rag/      # placeholder ריק — לא בשימוש, שולבו בפועל תחת extraction/embeddings/matching
 ├── api/                          # FastAPI routes for the dashboard — קריאה-בלבד, ללא LLM
 ├── frontend/                     # React + Vite + TypeScript, dashboard (RTL, ללא UI framework)
 ├── companies/

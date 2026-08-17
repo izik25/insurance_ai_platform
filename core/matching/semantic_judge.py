@@ -296,12 +296,30 @@ def collect_judge_results(client: OpenAI, batch_id: str) -> dict[str, JudgeVerdi
     return results
 
 
+# Substrings confirmed live in real 429 error bodies for a drained/expired
+# OpenAI balance ("insufficient_quota"/"credit_balance_exhausted") - unlike
+# an ordinary rate limit, this never clears on its own, so retrying (let
+# alone letting *every other concurrent worker* keep retrying too) only
+# burns wall-clock time. Confirmed live: with concurrency=150 and no fast
+# fail, a drained balance mid-run kept ~150 workers retrying for over 20
+# minutes (surfacing partly as RateLimitError, partly as APIConnectionError
+# once the sustained retry storm itself started getting connections
+# dropped) before the run gave up - `abort_event` cuts that to seconds.
+_QUOTA_EXHAUSTED_MARKERS = ("insufficient_quota", "credit_balance_exhausted")
+
+
+def _is_quota_exhausted(exc: Exception) -> bool:
+    text = str(exc)
+    return any(marker in text for marker in _QUOTA_EXHAUSTED_MARKERS)
+
+
 async def judge_pair(
     client: AsyncOpenAI,
     model: str,
     doc_a: DocumentJudgeInfo,
     doc_b: DocumentJudgeInfo,
     rate_limiter: _RateLimiter,
+    abort_event: asyncio.Event,
 ) -> JudgeVerdict | None:
     """Judge one pair via a plain (non-batch) chat completion, with retries.
 
@@ -310,7 +328,16 @@ async def judge_pair(
     pacing requests (the token estimate is approximate, and other usage on
     the account isn't visible to it). Returns None only after exhausting
     retries or on a genuine schema-validation failure.
+
+    Checks `abort_event` before spending a rate-limiter slot or making a
+    request at all - once *any* call detects a drained account balance (see
+    `_is_quota_exhausted`), it sets the event so every other in-flight/
+    queued worker bails out immediately instead of independently
+    rediscovering the same dead end.
     """
+    if abort_event.is_set():
+        return None
+
     estimated_tokens = _estimate_tokens(doc_a, doc_b)
     delay = 2.0
     for attempt in range(_MAX_RETRIES):
@@ -338,6 +365,11 @@ async def judge_pair(
             logger.warning("Judge schema validation failed: %s", exc)
             return None
         except (RateLimitError, APIConnectionError, APIStatusError) as exc:
+            if _is_quota_exhausted(exc):
+                if not abort_event.is_set():
+                    logger.warning("Account balance exhausted - aborting remaining pairs: %s", exc)
+                abort_event.set()
+                return None
             if attempt == _MAX_RETRIES - 1:
                 logger.warning("Judge call failed after %d attempts: %s", _MAX_RETRIES, exc)
                 return None
@@ -376,11 +408,17 @@ async def judge_pairs_concurrent(
     client = AsyncOpenAI(api_key=api_key)
     semaphore = asyncio.Semaphore(concurrency)
     rate_limiter = _RateLimiter(_TOKENS_PER_MINUTE, _REQUESTS_PER_MINUTE)
+    abort_event = asyncio.Event()
 
     async def _worker(pair_id: str, doc_a: DocumentJudgeInfo, doc_b: DocumentJudgeInfo) -> None:
         async with semaphore:
-            verdict = await judge_pair(client, model, doc_a, doc_b, rate_limiter)
+            verdict = await judge_pair(client, model, doc_a, doc_b, rate_limiter, abort_event)
         on_result(pair_id, verdict)
 
     await asyncio.gather(*(_worker(pid, a, b) for pid, (a, b) in pairs.items()))
     await client.close()
+    if abort_event.is_set():
+        logger.warning(
+            "Run aborted early due to exhausted account balance - re-run once credit is added "
+            "to pick up where this left off (unjudged pairs weren't checkpointed as failures)."
+        )

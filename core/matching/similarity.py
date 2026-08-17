@@ -47,6 +47,16 @@ class DocumentMeta:
     appendix_name: str | None = None
     coverage_type: str | None = None
     coverage_name: str | None = None
+    # Document.is_active (see core/database/models.py) - defaults to True so
+    # every existing caller/test that doesn't pass this keeps behaving
+    # exactly as before. Only gates CANDIDATE eligibility (see the `if not
+    # other_meta.is_active: continue` checks below) - a document itself
+    # never needs to be active to be matched *from*: a superseded/old
+    # appendix should still be able to find its current cross-company
+    # equivalent, it just must never be matched *against* another
+    # superseded appendix (old-vs-old is never a meaningful comparison,
+    # since neither side describes what's actually being sold today).
+    is_active: bool = True
 
 
 @dataclass(frozen=True)
@@ -136,6 +146,8 @@ def rank_candidates_by_company(
             other_meta = doc_meta[other_id]
             if other_meta.company_id == meta.company_id or other_meta.domain != meta.domain:
                 continue
+            if not other_meta.is_active:
+                continue
             score = float(similarity[i, j])
             if score < min_score:
                 continue
@@ -175,6 +187,14 @@ def find_cross_company_matches(
     recorded as a low-confidence match, and if none of a company's
     candidates are corroborated, that company contributes nothing for this
     document at all.
+
+    Every document in `doc_meta` is eligible as a SOURCE (the `document_id`
+    side) regardless of `DocumentMeta.is_active` - a superseded/historical
+    appendix still deserves to know its current cross-company equivalent.
+    Only active documents are eligible as a CANDIDATE (the
+    `matched_document_id` side): old-vs-old is never a meaningful
+    comparison, and an inactive document must never anchor a match either
+    (see DocumentMeta.is_active's docstring).
     """
     threshold = get_settings().similarity_auto_confirm_threshold
     doc_ids = [d for d in embeddings_by_doc if d in doc_meta]
@@ -193,6 +213,8 @@ def find_cross_company_matches(
                 continue
             other_meta = doc_meta[other_id]
             if other_meta.company_id == meta.company_id or other_meta.domain != meta.domain:
+                continue
+            if not other_meta.is_active:
                 continue
             score = float(similarity[i, j])
             candidates_by_company.setdefault(other_meta.company_id, []).append((j, score))
