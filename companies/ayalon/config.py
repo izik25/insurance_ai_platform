@@ -21,6 +21,18 @@ Per explicit user decision (2026-08-12), only the three subjects this
 platform actually tracks are kept via `COLLECTIVE_SUBJECT_TO_DOMAIN`; דירה
 and רכב are out of scope, same as every other company plugin excluding
 home/car lines entirely.
+
+"ביטוח משכנתא" (mortgage, added 2026-08-17 per explicit user request)
+folded into `life` - confirmed live via the full archive dump, 10 items,
+real appendix/policy content (e.g. "משכנתא לאדם עם מוגבלות מקצרת חיים
+נספח 1120 מהדורה 10.2024", "דרור למשכנתא 1122 מהדורה 10.2024"). Same
+don't-split-life-and-structure-cover precedent as every other company's
+mortgage category this session (see companies/harel/config.py for the
+fuller writeup) - this category also contains at least one pure
+structural/property policy ("פוליסה לביטוח מבנה בבנקים למשכנתאות"), kept
+in rather than split out. No "סיעוד"/long-term-care category exists
+anywhere in the live archive - all 21 distinct categoryName values were
+enumerated live and none match; genuinely not offered/listed here.
 """
 
 from __future__ import annotations
@@ -36,6 +48,7 @@ CATEGORY_TO_DOMAIN: dict[str, str] = {
     "ביטוח תאונות אישיות": "health",
     "ביטוח בריאות": "health",
     "ביטוח תאונות אישיות - בריאות": "health",
+    "ביטוח משכנתא": "life",
 }
 
 # "ביטוח קולקטיב" is handled separately from CATEGORY_TO_DOMAIN: it's kept

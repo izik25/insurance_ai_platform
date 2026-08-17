@@ -19,6 +19,19 @@ forms/policies/claims/questionnaires/archive), but nothing in the raw HTML
 cleanly associates a given card with one specific tab, and per user
 instruction ("pull everything") no attempt is made to filter or classify by
 tab - every PDF link found on a listing page is ingested.
+
+`/file-finder/mortgage-insurance/` (added 2026-08-17 per explicit user
+request) folded into `life`: real appendix content confirmed live (72
+docs, e.g. "פוליסת ביטוח מגן למשכנתא | נספח 665 | 11/2022" and its
+disability variant "נספח 615"), same "מגן למשכנתא (חיים ומבנה)"
+life+structure bundling as every other company's mortgage category, so
+kept together rather than split - same precedent as Harel/Direct
+Insurance. The site's own nav (confirmed live by parsing every
+`/file-finder/*` link off the health-insurance listing page) has no
+long-term-care/"סיעוד" category at all - full list is health, life,
+mortgage, apartment, car, business, engineering, foreign-employees,
+pension-savings, best-invest - so there's nothing to add for that one;
+not an omission, genuinely not offered/listed here.
 """
 
 from __future__ import annotations
@@ -30,6 +43,18 @@ from core.plugins.base import CompanyConfig
 DOMAIN_TO_LISTING_PATH: dict[str, str] = {
     "health": "/file-finder/health-insurance/",
     "life": "/file-finder/life-insurance/",
+    "mortgage": "/file-finder/mortgage-insurance/",
+}
+
+# DOMAIN_TO_LISTING_PATH's keys double as the platform `domain` each ref is
+# tagged with (see downloader.py's `_list_domain`) - "mortgage" isn't a real
+# platform domain, so it's remapped to "life" right after listing (see
+# downloader.list_documents()) rather than baked in here, to keep this dict
+# a straightforward path lookup.
+LISTING_DOMAIN_TO_PLATFORM_DOMAIN: dict[str, str] = {
+    "health": "health",
+    "life": "life",
+    "mortgage": "life",
 }
 
 

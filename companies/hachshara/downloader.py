@@ -41,7 +41,11 @@ from urllib.parse import unquote
 
 import httpx
 
-from companies.hachshara.config import DOMAIN_TO_LISTING_PATH, HachsharaConfig
+from companies.hachshara.config import (
+    DOMAIN_TO_LISTING_PATH,
+    LISTING_DOMAIN_TO_PLATFORM_DOMAIN,
+    HachsharaConfig,
+)
 from core.exceptions import StorageError
 from core.extraction.appendix_number import find_appendix_numbers
 from core.plugins.base import BaseDownloader
@@ -147,8 +151,9 @@ class HachsharaDownloader(BaseDownloader):
         refs: list[HachsharaDocumentRef] = []
         seen_urls: set[str] = set()
 
-        for domain, path in DOMAIN_TO_LISTING_PATH.items():
-            for ref in self._list_domain(domain, path):
+        for listing_domain, path in DOMAIN_TO_LISTING_PATH.items():
+            platform_domain = LISTING_DOMAIN_TO_PLATFORM_DOMAIN[listing_domain]
+            for ref in self._list_domain(platform_domain, path):
                 if ref.download_url not in seen_urls:
                     seen_urls.add(ref.download_url)
                     refs.append(ref)

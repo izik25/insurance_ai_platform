@@ -18,6 +18,20 @@ the search page and driven a real UI search (select the dropdowns, click
 the search button) at least once. PDF downloads themselves, served from
 /media/, are NOT behind this protection - a plain HTTP GET with a normal
 User-Agent and no cookies works fine (confirmed live).
+
+"ביטוח סיעודי"/long-term-care (Family "13217", added 2026-08-17 per
+explicit user request) folded into `health` - same convention every other
+company plugin uses for long-term-care (see companies/harel/config.py,
+companies/phoenix/config.py). Confirmed live: querying it with either
+Company id ("1"/"9") returns 0 results, but leaving Company unfiltered
+(blank, `""` - the select's own default/pre-selected value, no explicit
+"all companies" option exists) returns 25 real policies (e.g. "אחריות
+לעתיד - נוסח פוליסה", AttachmentNumber 991) - these older LTC records
+apparently carry an empty CompanyDesc rather than "1"/"9" the way every
+other Family's documents do. See `FAMILY_COMPANY_FILTER_IDS` for how this
+per-Family override is applied; no mortgage ("משכנתא") Family was found on
+this site (not yet exhaustively searched - the LTC Family id came from a
+targeted lookup, not a full dropdown enumeration).
 """
 
 from __future__ import annotations
@@ -31,9 +45,16 @@ from core.plugins.base import CompanyConfig
 # separate Family on Clal's site - they're a subset of "בריאות" (health),
 # same as how Migdal/Phoenix critical-illness documents already live under
 # the "health" domain.
-DOMAIN_TO_FAMILY: dict[str, str] = {
-    "health": "1520",
-    "life": "8277",
+DOMAIN_TO_FAMILY: dict[str, list[str]] = {
+    "health": ["1520", "13217"],
+    "life": ["8277"],
+}
+
+# Per-Family override of ClalConfig.company_filter_ids - only Family
+# "13217" (סיעודי) needs this (see module docstring); every other Family
+# uses the default ["1", "9"] loop.
+FAMILY_COMPANY_FILTER_IDS: dict[str, list[str]] = {
+    "13217": [""],
 }
 
 

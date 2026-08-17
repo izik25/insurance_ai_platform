@@ -7,6 +7,7 @@ def test_domain_to_page_url_mapping() -> None:
     assert DOMAIN_TO_PAGE_URL == {
         "health": "https://www.aig.co.il/health-insurance/",
         "life": "https://www.aig.co.il/life-insurance/",
+        "mortgage": "https://www.aig.co.il/mortgage-insurance/",
     }
 
 

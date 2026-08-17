@@ -4,7 +4,7 @@ from companies.directinsurance.config import DOMAIN_TO_PRODUCT, DirectInsuranceC
 
 
 def test_domain_to_product_mapping() -> None:
-    assert DOMAIN_TO_PRODUCT == {"life": ["7"], "health": ["8", "9"]}
+    assert DOMAIN_TO_PRODUCT == {"life": ["7", "6"], "health": ["8", "9"]}
 
 
 def test_default_config_values() -> None:

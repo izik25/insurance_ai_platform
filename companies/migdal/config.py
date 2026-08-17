@@ -9,6 +9,14 @@ The mapping below was confirmed against a live pull of the full department list
 (2026-07-15) and reviewed with the business owner. Categories not listed here
 (e.g. "חיסכון אישי" — personal savings) are intentionally excluded because they
 are not health or life insurance products.
+
+"ביטוח משכנתא" (mortgage) added to LIFE_DEPARTMENTS 2026-08-17 per explicit
+user request - same life/death-benefit framing as every other company's
+mortgage category (see companies/harel/config.py for the fuller writeup of
+that reasoning). Long-term-care ("סיעוד") was already covered before this
+change: it's bundled into the single "ביטוח בריאות וסיעוד" department,
+already in HEALTH_DEPARTMENTS - Migdal's own taxonomy doesn't split it out
+as its own department, so there was nothing to add there.
 """
 
 from __future__ import annotations
@@ -34,6 +42,7 @@ LIFE_DEPARTMENTS: frozenset[str] = frozenset(
     {
         "ביטוח חיים עם חיסכון",
         "ביטוח למקרה מוות",
+        "ביטוח משכנתא",
     }
 )
 

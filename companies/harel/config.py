@@ -18,15 +18,25 @@ brands Harel Group operates (אליהו, דקלה, ציון, שירביט, של�
 
 `AREA_TO_DOMAIN` maps the site's own area GUIDs (confirmed live via the
 `archive_area` select's option values) to this platform's domain
-(health/life). Restricted to the six categories requested (2026-08):
-בריאות, חיים, מחלות קשות, אובדן כושר עבודה, חיים פנסיוני, תאונות אישיות -
-the site has several more (סיעודי, לעסק, עובדים זרים ותיירים, חיסכון
-והשקעה, רכב, נסיעות לחו"ל, דירה, שיניים, רכוש, משכנתא) that are out of
-scope, consistent with how every other company plugin only tracks
-health/life. "אובדן כושר עבודה"/"מחלות קשות"/"תאונות אישיות" are folded
-into health (same convention Menorah/Migdal/Phoenix/Clal already use);
-"חיים פנסיוני" is folded into life (a pension-adjacent life product, not a
-distinct domain the platform tracks).
+(health/life). Covers eight categories: בריאות, חיים, מחלות קשות, אובדן
+כושר עבודה, חיים פנסיוני, תאונות אישיות, סיעודי, משכנתא (סיעודי/משכנתא
+added 2026-08-17, per explicit user request - previously excluded along
+with the site's remaining out-of-scope categories: לעסק, עובדים זרים
+ותיירים, חיסכון והשקעה, רכב, נסיעות לחו"ל, דירה, שיניים, רכוש). "אובדן
+כושר עבודה"/"מחלות קשות"/"תאונות אישיות"/"סיעודי" are folded into health
+(same convention Menorah/Migdal/Phoenix/Clal already use for
+long-term-care); "חיים פנסיוני" is folded into life (a pension-adjacent
+life product, not a distinct domain the platform tracks). "משכנתא" is
+folded into **life**: its core insurable event is death/disability tied to
+loan repayment (e.g. "ביטוח חיים למשכנתא"), the same framing as the life
+domain's other products - consistent with how Direct Insurance's own
+life-adjacent salesGroups were kept as-is rather than split out (see
+companies/directinsurance/config.py). The category also contains a
+structural/property component ("ביטוח מבנה דירה למשכנתא") that doesn't
+cleanly fit either domain; not split out separately, same
+don't-over-engineer-a-single-category rationale as Direct Insurance's.
+Flagged for the user to correct if this classification doesn't match how
+they want mortgage documents to surface in cross-company matching.
 
 Each result row's "מספר נספח" (appendix number) column comes straight from
 the site's own metadata - no OCR/LLM guessing needed, same as
@@ -78,8 +88,10 @@ AREA_TO_DOMAIN: dict[str, str] = {
     "324cd4d0-ece4-4cca-a936-1a7d87c14098": "health",  # ביטוח אובדן כושר עבודה
     "49078542-cd71-4ac8-a565-f58a728560ef": "health",  # ביטוח מחלות קשות
     "a4b79403-7ff8-4ed3-82f1-e84097f7dab3": "health",  # ביטוח תאונות אישיות
+    "46dd45e4-0367-4465-b8a2-4f5419481aae": "health",  # ביטוח סיעודי
     "a4d4bd40-0e52-4fe8-816b-8a41f4b85a9c": "life",  # ביטוח חיים
     "de3f0a61-7ca9-469c-a4f0-40a69aa1174e": "life",  # ביטוח חיים פנסיוני
+    "c45976d3-7761-4ecc-b836-0e945cd50ab0": "life",  # ביטוח משכנתא
 }
 
 # area GUID -> the Hebrew label as it appears on-site (kept only for logging).
@@ -88,8 +100,10 @@ AREA_LABELS: dict[str, str] = {
     "324cd4d0-ece4-4cca-a936-1a7d87c14098": "ביטוח אובדן כושר עבודה",
     "49078542-cd71-4ac8-a565-f58a728560ef": "ביטוח מחלות קשות",
     "a4b79403-7ff8-4ed3-82f1-e84097f7dab3": "ביטוח תאונות אישיות",
+    "46dd45e4-0367-4465-b8a2-4f5419481aae": "ביטוח סיעודי",
     "a4d4bd40-0e52-4fe8-816b-8a41f4b85a9c": "ביטוח חיים",
     "de3f0a61-7ca9-469c-a4f0-40a69aa1174e": "ביטוח חיים פנסיוני",
+    "c45976d3-7761-4ecc-b836-0e945cd50ab0": "ביטוח משכנתא",
 }
 
 # Areas to query WITHOUT the `cn=הראל` company filter - confirmed live: both
@@ -103,6 +117,11 @@ AREA_LABELS: dict[str, str] = {
 # Health areas keep the filter (confirmed live: it correctly narrows out
 # Eliahu/Dikla/Tzion/Shirbit/Shlach's own health documents, which are
 # numerous - dropping the filter there would pull in mostly non-Harel data).
+# סיעודי/משכנתא (added 2026-08-17) also keep the filter - confirmed live,
+# filtered gives *more* legitimate Harel rows than unfiltered for both (55
+# vs 31 for סיעודי across 6/4 pages; 9 vs 1 for משכנתא), with no genuine
+# other-company leakage found in the filtered results (a naive "כלל"
+# substring check false-positived on "קופת חולים כללית", not the insurer).
 UNFILTERED_AREAS: frozenset[str] = frozenset(
     {
         "a4d4bd40-0e52-4fe8-816b-8a41f4b85a9c",  # ביטוח חיים
@@ -111,20 +130,24 @@ UNFILTERED_AREAS: frozenset[str] = frozenset(
 )
 
 # Harel site area slug -> platform domain. Same health/life folding as
-# AREA_TO_DOMAIN above (see module docstring); life pension has no live
-# product-listing page and is left archive-only.
+# AREA_TO_DOMAIN above (see module docstring); life pension and long-term-care
+# have no live product-listing page and stay archive-only (confirmed live
+# 2026-08-17: /insurance/long-term-care has no /policies sub-index at all,
+# only /information pages - Harel doesn't appear to sell it self-service
+# here the way every other tracked category is sold).
 LIVE_AREA_TO_DOMAIN: dict[str, str] = {
     "health": "health",
     "diseases-disabilities": "health",  # מחלות קשות
     "loss-of-working-ability": "health",  # אובדן כושר עבודה
     "personal-accident": "health",  # תאונות אישיות
     "life": "life",
+    "mortgage": "life",  # ביטוח משכנתא - see AREA_TO_DOMAIN's docstring note on this choice
 }
 
 # area slug -> product-page slugs, from crawling each
 # harel-group.co.il/insurance/<area>/policies index page (confirmed live
-# 2026-08-12 - see module docstring). Re-crawl that index periodically;
-# this list is a snapshot, not derived at runtime.
+# 2026-08-12, mortgage added 2026-08-17 - see module docstring). Re-crawl
+# that index periodically; this list is a snapshot, not derived at runtime.
 LIVE_PRODUCT_PAGES: dict[str, list[str]] = {
     "health": [
         "ambulatory-care", "child-development", "complementary", "doctor-at-home",
@@ -141,6 +164,7 @@ LIVE_PRODUCT_PAGES: dict[str, list[str]] = {
         "future-premium", "insurance-umbrella", "premium-release", "strength-tomorrow",
     ],
     "personal-accident": ["midlife-family", "scuba-diving"],
+    "mortgage": ["safe-mortgage", "structural", "structural-b"],
 }
 
 # Link text substrings that mark a live-page PDF as collateral (application

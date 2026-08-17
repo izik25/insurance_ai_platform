@@ -41,7 +41,7 @@ from urllib.parse import unquote
 import httpx
 from playwright.sync_api import sync_playwright
 
-from companies.clal.config import DOMAIN_TO_FAMILY, ClalConfig
+from companies.clal.config import DOMAIN_TO_FAMILY, FAMILY_COMPANY_FILTER_IDS, ClalConfig
 from core.exceptions import StorageError
 from core.plugins.base import BaseDownloader
 from core.storage.local import LocalFileStorage
@@ -167,14 +167,18 @@ class ClalDownloader(BaseDownloader):
             page = context.new_page()
             page.goto(self._config.search_page_url, wait_until="networkidle", timeout=60000)
 
-            for domain, family_id in DOMAIN_TO_FAMILY.items():
-                for company_id in self._config.company_filter_ids:
-                    for ref in self._list_domain(page, domain, family_id, company_id):
-                        if ref.download_url not in seen_urls:
-                            seen_urls.add(ref.download_url)
-                            refs.append(ref)
-                    if self._config.listing_delay_seconds:
-                        time.sleep(self._config.listing_delay_seconds)
+            for domain, family_ids in DOMAIN_TO_FAMILY.items():
+                for family_id in family_ids:
+                    company_ids = FAMILY_COMPANY_FILTER_IDS.get(
+                        family_id, self._config.company_filter_ids
+                    )
+                    for company_id in company_ids:
+                        for ref in self._list_domain(page, domain, family_id, company_id):
+                            if ref.download_url not in seen_urls:
+                                seen_urls.add(ref.download_url)
+                                refs.append(ref)
+                        if self._config.listing_delay_seconds:
+                            time.sleep(self._config.listing_delay_seconds)
 
             browser.close()
 

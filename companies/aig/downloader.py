@@ -66,7 +66,7 @@ from urllib.parse import unquote, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from companies.aig.config import DOMAIN_TO_PAGE_URL, AigConfig
+from companies.aig.config import DOMAIN_TO_PAGE_URL, PAGE_KEY_TO_PLATFORM_DOMAIN, AigConfig
 from core.exceptions import StorageError
 from core.extraction.appendix_number import find_appendix_numbers
 from core.plugins.base import BaseDownloader
@@ -199,16 +199,17 @@ class AigDownloader(BaseDownloader):
     def list_documents(self) -> list[AigDocumentRef]:
         """Fetch every document ref across every tracked domain's page."""
         refs: list[AigDocumentRef] = []
-        for domain, page_url in DOMAIN_TO_PAGE_URL.items():
+        for page_key, page_url in DOMAIN_TO_PAGE_URL.items():
+            domain = PAGE_KEY_TO_PLATFORM_DOMAIN[page_key]
             try:
                 resp = self._client.get(page_url)
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.warning("AIG %s page fetch failed: %s", domain, exc)
+                logger.warning("AIG %s page fetch failed: %s", page_key, exc)
                 continue
 
             domain_refs = refs_from_page_html(domain, resp.text)
-            logger.info("AIG %s: %d documents found", domain, len(domain_refs))
+            logger.info("AIG %s: %d documents found", page_key, len(domain_refs))
             refs.extend(domain_refs)
 
         logger.info("AIG archive: %d documents found", len(refs))

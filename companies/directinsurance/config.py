@@ -33,6 +33,16 @@ Kept as domain="life" here anyway per explicit user decision (2026-07):
 the cross-company matching pipeline will still surface the right pairing
 against its counterpart if relevant, so this wasn't worth the extra
 complexity of a per-salesGroup override.
+
+Product 6, "ביטוח משכנתא"/mortgage (added 2026-08-17 per explicit user
+request), is folded into `life` for the same reason: its "חיים למשכנתא"
+salesGroup is a life/death-benefit product, and the site doesn't expose a
+finer split than whole-product salesGroup queries, so its other salesGroup
+("מבנה למשכנתא", a structural/property cover) rides along into life too -
+same don't-split-a-single-category precedent as the two salesGroups above.
+No long-term-care ("סיעוד") product exists anywhere in this site's own
+10-product taxonomy (confirmed live 2026-08-17 via `formdata`) - not
+omitted, genuinely not offered/listed here.
 """
 
 from __future__ import annotations
@@ -42,7 +52,7 @@ from pydantic import Field
 from core.plugins.base import CompanyConfig
 
 DOMAIN_TO_PRODUCT: dict[str, list[str]] = {
-    "life": ["7"],
+    "life": ["7", "6"],
     "health": ["8", "9"],
 }
 

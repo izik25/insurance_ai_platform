@@ -7,6 +7,7 @@ def test_domain_to_listing_path_mapping() -> None:
     assert DOMAIN_TO_LISTING_PATH == {
         "health": "/file-finder/health-insurance/",
         "life": "/file-finder/life-insurance/",
+        "mortgage": "/file-finder/mortgage-insurance/",
     }
 
 

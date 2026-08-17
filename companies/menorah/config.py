@@ -41,20 +41,32 @@ from core.plugins.base import CompanyConfig
 # lineOfBusiness id -> the dropdown's exact option label (needed to click
 # the right option in the UI-driven search - see downloader.py). Restricted
 # to what this platform tracks; the site has several more categories (car,
-# mortgage, travel, home/business insurance, pension fund rules, etc.) that
-# are out of scope.
+# travel, home/business insurance, pension fund rules, etc.) that are out
+# of scope.
+#
+# id 7 ("ביטוח סיעודי"/long-term-care) and id 4 ("ביטוח משכנתא"/mortgage)
+# added 2026-08-17 per explicit user request - confirmed live (one careful
+# dropdown read + one search per category, respecting this site's CAPTCHA
+# sensitivity - see module docstring): 22 real results for id 7, 13 for id
+# 4. Long-term-care folded into `health` (same convention as every other
+# company plugin's long-term-care category); mortgage folded into `life`
+# (same don't-split-life-and-structure-cover precedent as every other
+# company's mortgage category this session - see companies/harel/config.py
+# for the fuller writeup).
 DOMAIN_TO_LINES_OF_BUSINESS: dict[str, list[tuple[int, str]]] = {
     "health": [
         (5, "ביטוח בריאות"),
         (6, "ביטוח מחלות קשות"),
         (3, "ביטוח אובדן כושר עבודה"),
         (13, "ביטוח תאונות אישיות"),
+        (7, "ביטוח סיעודי"),
     ],
     "life": [
         (15, "ביטוח חיים – תוכניות הכוללות רכיב ריסק בלבד"),
         (16, "ביטוח חיים – תוכניות לעצמאים"),
         (17, "ביטוח חיים – תוכניות ביטוח פרט"),
         (18, "ביטוח חיים – תוכניות לשכירים (מנהלים)"),
+        (4, "ביטוח משכנתא"),
     ],
 }
 
