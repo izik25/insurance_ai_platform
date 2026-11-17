@@ -19,7 +19,12 @@ from openai import OpenAI
 from pydantic import ValidationError
 
 from core.canonical.schema import CanonicalCoverageProfile
-from core.database.models import Document, DocumentAdditionalFinding, DocumentExtraction, DocumentQuestionAnswer
+from core.database.models import (
+    Document,
+    DocumentAdditionalFinding,
+    DocumentExtraction,
+    DocumentQuestionAnswer,
+)
 from core.extraction.batch_polling import call_with_connection_retry, wait_for_batch_resilient
 from core.extraction.json_schema_utils import enforce_strict_json_schema, strip_nul_bytes
 from core.utils.logging import get_logger
@@ -36,15 +41,63 @@ Coverage Profile), שמטרתו לתאר את משמעות הכיסוי בצור
 שקיבלת - התפקיד שלך הוא לארגן ולנסח מחדש, לא לחלץ מידע נוסף. אם מידע חסר, \
 השאר את השדה הרלוונטי ריק/null.
 
-הקפד:
+סדר עדיפות בין המקורות:
+- תשובות מאגר השאלות הן המקור המועדף: הן נקראו מהמסמך המלא ומגובות בציטוט.
+- השדות המובנים שחולצו קודם הם מקור משני ועלולים להכיל טעויות. כשהם סותרים \
+את תשובות מאגר השאלות - תשובות מאגר השאלות קובעות.
+- אם מאגר השאלות סימן נושא כ-NOT_FOUND, השאר את השדה המתאים ריק גם אם \
+השדות המובנים מכילים ערך.
+
+הגדרות התקופות - סווג לפי המשמעות, לא לפי המילה שהמסמך או מקור קודם השתמשו בה:
+- תקופת אכשרה (qualifying_period_text): נספרת מתחילת הביטוח; מקרה ביטוח \
+שאירע בתוכה אינו מכוסה כלל.
+- תקופת המתנה (waiting_period_text): נספרת מקרות מקרה הביטוח; עד תומה לא \
+משולם תגמול (למשל "לא ישולמו תגמולים בעד שלושת החודשים הראשונים").
+- תקופת הישרדות (survival_period_text): המבוטח חייב להישאר בחיים מספר ימים \
+אחרי מקרה הביטוח כדי לקבל תגמול (למשל "ובלבד שהמבוטח לא נפטר במהלך 14 ימים").
+- סעיף על פיצוי במקרה מוות תוך X ימים אינו תקופת הישרדות. הודעה מוקדמת על \
+שינוי פרמיה אינה תקופת המתנה.
+- לעולם אל תכניס את אותו טקסט ליותר משדה תקופה אחד.
+- העתק את הטקסט כפי שמופיע במקור (טקסט חופשי) - אל תמיר לימים בעצמך.
+
+סכומים:
+- amounts: רק סכומים שמשולמים למבוטח או לנותן השירות בגין הכיסוי (סכום \
+ביטוח, פיצוי, תקרת שיפוי). לא השתתפות עצמית, לא פרמיה/דמי ביטוח, לא מחיר.
+- deductible: השתתפות עצמית בלבד.
+- caps: תקרות לתגמול.
+
+גילאים (age_restrictions):
+- min_age/max_age: רק גיל הצטרפות/כניסה לביטוח שהמסמך קובע במפורש. טבלת \
+פרמיות לפי גיל אינה מגבלת גיל - במקרה כזה השאר null.
+- termination_age: הגיל שבו הכיסוי מסתיים. אל תעתיק אותו ל-max_age.
+
+benefit_type: התחל באחד מהביטויים הבאים, לפי התגמול העיקרי של הכיסוי: \
+"פיצוי חד-פעמי", "שיפוי", "פיצוי חודשי", "שירות בעין". אפשר להוסיף אחריו \
+הסבר קצר, ותגמול משני רק אחרי העיקרי.
+
+שאר השדות:
 - covered_events/covered_conditions: רשימת אירועים/מצבים המכוסים בפועל.
 - exclusions_normalized/limitations: הפרד בין חריגים מוחלטים לבין סייגים/מגבלות.
-- waiting_period_text/qualifying_period_text/survival_period_text: כפי \
-שמופיע במקור (טקסט חופשי) - אל תמיר לימים בעצמך.
-- deductible/age_restrictions: מבנה קבוע כפי שהוגדר בסכמה.
 - definitions: הגדרות מהותיות המשנות את משמעות הכיסוי (term + definition).
 - additional_findings_summary: סיכום קצר של כל הממצאים הנוספים שנאספו.
 """
+
+# Question-bank answers whose NOT_FOUND status is itself information the
+# profile needs (so the model can leave the matching field empty instead of
+# filling it from the secondary extracted fields). Every other NOT_FOUND is
+# still omitted to keep the input short.
+_KEEP_NOT_FOUND = {
+    "base.waiting_period_exists",
+    "base.waiting_period_details",
+    "base.qualifying_period_exists",
+    "base.qualifying_period_details",
+    "base.survival_period_exists",
+    "base.survival_period_details",
+    "base.insurance_amount_exists",
+    "base.insurance_amount_details",
+    "base.deductible_exists",
+    "base.age_limitations",
+}
 
 
 def build_profile_input(
@@ -53,7 +106,7 @@ def build_profile_input(
     question_answers: list[DocumentQuestionAnswer],
     additional_findings: list[DocumentAdditionalFinding],
 ) -> str:
-    lines: list[str] = ["# שדות מובנים שחולצו מהמסמך"]
+    lines: list[str] = ["# שדות מובנים שחולצו מהמסמך (מקור משני - עלול להכיל טעויות)"]
     for field_name in (
         "coverage_type",
         "coverage_name",
@@ -73,13 +126,15 @@ def build_profile_input(
     if document.department_name:
         lines.append(f"department_name: {document.department_name}")
 
-    lines.append("\n# תשובות ממאגר השאלות")
+    lines.append("\n# תשובות ממאגר השאלות (מקור מועדף - מגובות בציטוט מהמסמך)")
     for answer in question_answers:
-        if answer.status == "NOT_FOUND":
+        if answer.status == "NOT_FOUND" and answer.question_id not in _KEEP_NOT_FOUND:
             continue
         text = f"[{answer.status}] {answer.question_id}"
         if answer.answer_text:
             text += f": {answer.answer_text}"
+        if answer.evidence_text and answer.status in ("FOUND", "AMBIGUOUS"):
+            text += f' (ציטוט: "{answer.evidence_text}")'
         lines.append(text)
 
     if additional_findings:

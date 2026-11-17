@@ -11,6 +11,10 @@ pipeline.
 
 Usage: python scripts/build_fingerprints.py [--limit N] [--company migdal,phoenix]
        [--category-prefix health.critical_illness]
+       [--document-ids ID1,ID2 | --document-ids-file ids.txt] [--force]
+
+--document-ids/--document-ids-file restrict the run to exactly those
+documents; --force rebuilds them even if already current.
 """
 
 from __future__ import annotations
@@ -33,19 +37,31 @@ from core.database.models import (  # noqa: E402
     DocumentClassification,
     DocumentFingerprint,
     DocumentPipelineStatus,
+    DocumentQuestionAnswer,
 )
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.fingerprint.builder import FINGERPRINT_VERSION, build_fingerprint  # noqa: E402
-from core.knowledge_base.registry import normalize_to_code  # noqa: E402
+from core.knowledge_base.registry import (  # noqa: E402
+    codes_mentioned,
+    normalize_to_earliest_code,
+)
+from core.utils.document_selection import (  # noqa: E402
+    add_document_selection_args,
+    read_document_ids,
+)
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
 
 def _pending_documents(
-    session: Session, companies: list[str] | None, category_prefix: str | None
+    session: Session,
+    companies: list[str] | None,
+    category_prefix: str | None,
+    document_ids: set[str] | None = None,
+    force: bool = False,
 ) -> list[str]:
-    already_current = set(
+    already_current = set() if force else set(
         session.scalars(
             select(DocumentPipelineStatus.document_id).where(
                 DocumentPipelineStatus.fingerprint_version == FINGERPRINT_VERSION
@@ -65,6 +81,9 @@ def _pending_documents(
     )
     if companies:
         query = query.where(Document.company_id.in_(companies))
+
+    if document_ids is not None:
+        query = query.where(Document.id.in_(document_ids))
 
     pending = []
     for document_id, category_id in session.execute(query):
@@ -87,7 +106,20 @@ def _build_and_save(session: Session, document_id: str) -> bool:
         return False
 
     profile = CanonicalCoverageProfile.model_validate(profile_row.raw_profile)
-    benefit_type_code = normalize_to_code(profile.benefit_type, "benefit_type") if profile.benefit_type else None
+    benefit_type_code = None
+    if profile.benefit_type:
+        benefit_type_code = normalize_to_earliest_code(profile.benefit_type, "benefit_type")
+        # A text naming several benefit types ("פיצוי חד-פעמי (במקרה מוות)
+        # ושיפוי...") is settled by the classification's benefit_model when
+        # it is one of them - the classifier judged the coverage as a whole.
+        mentioned = codes_mentioned(profile.benefit_type, "benefit_type")
+        if len(mentioned) > 1 and classification.benefit_model in mentioned:
+            benefit_type_code = classification.benefit_model
+    answers = session.scalars(
+        select(DocumentQuestionAnswer).where(DocumentQuestionAnswer.document_id == document_id)
+    ).all()
+    answer_statuses = {a.question_id: a.status for a in answers}
+    answer_texts = {a.question_id: (a.answer_text, a.evidence_text) for a in answers}
 
     result = build_fingerprint(
         main_category=classification.main_category,
@@ -97,6 +129,8 @@ def _build_and_save(session: Session, document_id: str) -> bool:
         target_population=classification.target_population,
         profile=profile,
         benefit_type_code=benefit_type_code,
+        answer_statuses=answer_statuses or None,
+        answer_texts=answer_texts or None,
     )
 
     row = DocumentFingerprint(
@@ -130,6 +164,14 @@ def _build_and_save(session: Session, document_id: str) -> bool:
         special_condition_count=result.special_condition_count,
         raw_features=result.raw_features,
     )
+    # merge() matches on the primary key, but row.id is freshly generated -
+    # reuse the existing row's id so a rebuild updates it instead of
+    # violating the unique document_id constraint.
+    existing_id = session.scalar(
+        select(DocumentFingerprint.id).where(DocumentFingerprint.document_id == document_id)
+    )
+    if existing_id is not None:
+        row.id = existing_id
     session.merge(row)
 
     status = session.get(DocumentPipelineStatus, document_id)
@@ -146,6 +188,7 @@ def main() -> None:
     arg_parser.add_argument("--limit", type=int, default=None)
     arg_parser.add_argument("--company", type=str, default=None)
     arg_parser.add_argument("--category-prefix", type=str, default=None)
+    add_document_selection_args(arg_parser)
     args = arg_parser.parse_args()
 
     settings = get_settings()
@@ -155,7 +198,9 @@ def main() -> None:
     companies = [c.strip() for c in args.company.split(",")] if args.company else None
 
     with session_scope() as session:
-        pending_ids = _pending_documents(session, companies, args.category_prefix)
+        pending_ids = _pending_documents(
+            session, companies, args.category_prefix, read_document_ids(args), args.force
+        )
         if args.limit is not None:
             pending_ids = pending_ids[: args.limit]
 

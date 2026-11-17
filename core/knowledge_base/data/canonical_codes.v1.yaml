@@ -298,16 +298,16 @@ codes:
   - code: LUMP_SUM
     code_category: benefit_type
     canonical_name_he: פיצוי חד-פעמי
-    synonyms: [סכום חד פעמי, תגמול חד פעמי]
+    synonyms: [סכום חד פעמי, תגמול חד פעמי, פיצוי חד פעמי, סכום חד-פעמי, תגמול חד-פעמי, חד-פעמי, חד פעמי]
   - code: REIMBURSEMENT
     code_category: benefit_type
     canonical_name_he: שיפוי
-    synonyms: [החזר הוצאות]
+    synonyms: [החזר הוצאות, החזר ההוצאות]
   - code: MONTHLY_ANNUITY
     code_category: benefit_type
     canonical_name_he: פיצוי/קצבה חודשית
-    synonyms: [תגמול חודשי, גמלה חודשית]
+    synonyms: [תגמול חודשי, גמלה חודשית, פיצוי חודשי, פיצויים חודשיים, קצבה חודשית, תגמולים חודשיים, תגמול סיעודי חודשי]
   - code: IN_KIND_SERVICE
     code_category: benefit_type
     canonical_name_he: שירות בעין
-    synonyms: [מתן שירות]
+    synonyms: [מתן שירות, שירותים בעין]

@@ -14,6 +14,7 @@ findings. Chunked + checkpointed like extract_documents.py.
 
 Usage: python scripts/answer_question_bank.py [--limit N] [--chunk-size N]
        [--company migdal,phoenix] [--category-prefix health.critical_illness]
+       [--document-ids ID1,ID2 | --document-ids-file ids.txt] [--force]
 """
 
 from __future__ import annotations
@@ -50,17 +51,26 @@ from core.questions.llm_answer import (  # noqa: E402
     wait_for_batch,
 )
 from core.questions.schema import QuestionAnswerBatch  # noqa: E402
+from core.questions.validation import validate_answers  # noqa: E402
+from core.utils.document_selection import (  # noqa: E402
+    add_document_selection_args,
+    read_document_ids,
+)
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
 
 def _pending_documents(
-    session: Session, companies: list[str] | None, category_prefix: str | None
+    session: Session,
+    companies: list[str] | None,
+    category_prefix: str | None,
+    document_ids: set[str] | None = None,
+    force: bool = False,
 ) -> list[tuple[str, str, str]]:
     """Returns (document_id, file_path, category_id) for documents classified
     but not yet answered at the current question_bank_version."""
-    already_current = set(
+    already_current = set() if force else set(
         session.scalars(
             select(DocumentPipelineStatus.document_id).where(
                 DocumentPipelineStatus.question_bank_version == QUESTION_BANK_VERSION
@@ -73,6 +83,8 @@ def _pending_documents(
     )
     if companies:
         query = query.where(Document.company_id.in_(companies))
+    if document_ids is not None:
+        query = query.where(Document.id.in_(document_ids))
 
     pending = []
     for document, classification in session.execute(query):
@@ -105,7 +117,12 @@ def _read_texts(
     return documents
 
 
-def _save_result(document_id: str, result: QuestionAnswerBatch, questions: list[QuestionDef]) -> None:
+def _save_result(
+    document_id: str,
+    result: QuestionAnswerBatch,
+    questions: list[QuestionDef],
+    validation_notes: dict[str, str] | None = None,
+) -> None:
     scope_by_id = {}
     base_ids = {q.question_id for q in questions if q.question_id.startswith("base.")}
     for question in questions:
@@ -123,7 +140,14 @@ def _save_result(document_id: str, result: QuestionAnswerBatch, questions: list[
                 evidence_text=answer.evidence_text,
                 evidence_page=answer.evidence_page,
                 evidence_section=answer.evidence_section,
-                raw_response=answer.model_dump(),
+                raw_response={
+                    **answer.model_dump(),
+                    **(
+                        {"validation": validation_notes[answer.question_id]}
+                        if validation_notes and answer.question_id in validation_notes
+                        else {}
+                    ),
+                },
             )
             session.add(row)
         for finding in result.additional_findings:
@@ -155,7 +179,13 @@ def _run_chunk(client: OpenAI, model: str, documents: dict[str, tuple[str, list[
         if result is None:
             failed += 1
             continue
-        _, questions = documents[document_id]
+        text, questions = documents[document_id]
+        # Rule-based check against the text the model actually read: a FOUND
+        # answer citing a number that isn't in the document, or a "quote"
+        # that isn't in it, is downgraded to AMBIGUOUS (core/questions/validation.py).
+        validation_notes = validate_answers(result, text)
+        if validation_notes:
+            logger.info("Document %s: %d answer(s) downgraded by text validation", document_id, len(validation_notes))
         # DocumentQuestionAnswer has a unique (document_id, question_bank_version,
         # question_id) index - delete any prior rows for this doc+version
         # first (idempotent re-run of a partially-saved chunk after a crash).
@@ -163,7 +193,10 @@ def _run_chunk(client: OpenAI, model: str, documents: dict[str, tuple[str, list[
             session.query(DocumentQuestionAnswer).filter_by(
                 document_id=document_id, question_bank_version=QUESTION_BANK_VERSION
             ).delete()
-        _save_result(document_id, result, questions)
+            # Findings are written by this same step, so a re-run replaces
+            # them too instead of appending a second copy.
+            session.query(DocumentAdditionalFinding).filter_by(document_id=document_id).delete()
+        _save_result(document_id, result, questions, validation_notes)
         saved += 1
     return saved, failed
 
@@ -174,6 +207,7 @@ def main() -> None:
     arg_parser.add_argument("--chunk-size", type=int, default=50)
     arg_parser.add_argument("--company", type=str, default=None, help="Comma-separated company_id list")
     arg_parser.add_argument("--category-prefix", type=str, default=None)
+    add_document_selection_args(arg_parser)
     args = arg_parser.parse_args()
 
     settings = get_settings()
@@ -186,7 +220,9 @@ def main() -> None:
     companies = [c.strip() for c in args.company.split(",")] if args.company else None
 
     with session_scope() as session:
-        pending = _pending_documents(session, companies, args.category_prefix)
+        pending = _pending_documents(
+            session, companies, args.category_prefix, read_document_ids(args), args.force
+        )
 
     if args.limit is not None:
         pending = pending[: args.limit]

@@ -94,6 +94,45 @@ def normalize_to_code(
     return None
 
 
+def codes_mentioned(
+    phrase: str, code_category: str, version: str = DEFAULT_VERSION
+) -> list[str]:
+    """Every code whose canonical name or synonym appears in `phrase`, in
+    order of first mention."""
+    text = phrase.strip()
+    positions: dict[str, int] = {}
+    for known_phrase, code in _normalization_index(code_category, version):
+        position = text.find(known_phrase)
+        if position != -1 and position < positions.get(code, len(text) + 1):
+            positions[code] = position
+    return sorted(positions, key=positions.__getitem__)
+
+
+def normalize_to_earliest_code(
+    phrase: str, code_category: str, version: str = DEFAULT_VERSION
+) -> str | None:
+    """Like normalize_to_code, but when several codes' phrases appear in the
+    text, returns the one mentioned FIRST rather than the longest phrase.
+
+    For single-valued fields described in a sentence that also mentions a
+    secondary element - e.g. benefit_type "פיצוי חודשי ... וכן החזר הוצאות
+    שיקום" (a real long-term-care appendix) - the leading phrase is the main
+    one; longest-phrase-wins picked REIMBURSEMENT there.
+    """
+    text = phrase.strip()
+    if not text:
+        return None
+    best: tuple[int, int, str] | None = None
+    for known_phrase, code in _normalization_index(code_category, version):
+        position = text.find(known_phrase)
+        if position == -1:
+            continue
+        candidate = (position, -len(known_phrase), code)
+        if best is None or candidate < best:
+            best = candidate
+    return best[2] if best else None
+
+
 @lru_cache
 def get_concepts(version: str = DEFAULT_VERSION) -> ConceptsConfig:
     return ConceptsConfig.model_validate(_load_yaml(f"concepts.{version}.yaml"))

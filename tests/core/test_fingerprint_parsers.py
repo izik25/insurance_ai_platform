@@ -26,6 +26,22 @@ class TestParsePeriodToDays:
         text = "90 יום למקרה ביטוח ראשון; 365 ימים למקרה ביטוח נוסף; 5 שנים ממועד ההחלמה המלאה מסרטן."
         assert parse_period_to_days(text) == 90
 
+    def test_spelled_out_number(self) -> None:
+        text = "תקופת ההמתנה היא שלושה חודשים. לא יגיעו פיצויים בעד הזמן שלפני סיום ההמתנה."
+        assert parse_period_to_days(text) == 90
+
+    def test_spelled_out_compound_number(self) -> None:
+        assert parse_period_to_days("שנים עשר חודשים במקרה ביטוח הקשור בהריון") == 360
+
+    def test_dual_form(self) -> None:
+        assert parse_period_to_days("תקופת אכשרה של חודשיים") == 60
+
+    def test_earliest_form_wins_across_digits_and_words(self) -> None:
+        assert parse_period_to_days("שלושה חודשים, ולמקרה נוסף 365 ימים") == 90
+
+    def test_zero_from_damaged_ocr_is_none(self) -> None:
+        assert parse_period_to_days("תקופת ההמתנת היא בת 00 יום.") is None
+
     def test_none_when_no_pattern(self) -> None:
         assert parse_period_to_days("אין.") is None
 
@@ -43,6 +59,9 @@ class TestParseAmount:
 
     def test_usd_word(self) -> None:
         assert parse_amount('עד 100,000 דולר (דולר אמריקאי) להוצאות רפואיות') == (100000.0, "USD")
+
+    def test_shekels_word(self) -> None:
+        assert parse_amount("השתתפות עצמית בסך 90 שקלים לכל מפגש") == (90.0, "ILS")
 
     def test_units_are_not_currency(self) -> None:
         # Migdal's "יחידות סכום ביטוח" needs an external multiplier - must

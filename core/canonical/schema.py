@@ -25,7 +25,10 @@ from pydantic import BaseModel, Field
 # for already-processed documents (same versioning convention as
 # core/taxonomy and core/knowledge_base's *.v1.yaml files, just for a
 # Python-defined schema instead of a YAML one).
-PROFILE_VERSION = "v1"
+# v2: prompt prefers question-bank answers over the earlier extracted
+# fields, defines the three period types by meaning, and excludes
+# deductibles/premiums from amounts and premium bands from entry ages.
+PROFILE_VERSION = "v2"
 CODES_VERSION = "v1"
 
 

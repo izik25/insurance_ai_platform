@@ -8,6 +8,7 @@ Phase 2 scripts.
 
 Usage: python scripts/build_canonical_profiles.py [--limit N] [--chunk-size N]
        [--company migdal,phoenix] [--category-prefix health.critical_illness]
+       [--document-ids ID1,ID2 | --document-ids-file ids.txt] [--force]
 """
 
 from __future__ import annotations
@@ -42,15 +43,23 @@ from core.database.models import (  # noqa: E402
 )
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.exceptions import ConfigurationError  # noqa: E402
+from core.utils.document_selection import (  # noqa: E402
+    add_document_selection_args,
+    read_document_ids,
+)
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
 
 def _pending_documents(
-    session: Session, companies: list[str] | None, category_prefix: str | None
+    session: Session,
+    companies: list[str] | None,
+    category_prefix: str | None,
+    document_ids: set[str] | None = None,
+    force: bool = False,
 ) -> list[str]:
-    already_current = set(
+    already_current = set() if force else set(
         session.scalars(
             select(DocumentPipelineStatus.document_id).where(
                 DocumentPipelineStatus.profile_version == PROFILE_VERSION
@@ -70,6 +79,9 @@ def _pending_documents(
     )
     if companies:
         query = query.where(Document.company_id.in_(companies))
+
+    if document_ids is not None:
+        query = query.where(Document.id.in_(document_ids))
 
     pending = []
     for document_id, category_id in session.execute(query):
@@ -133,6 +145,16 @@ def _save_result(document_id: str, profile: CanonicalCoverageProfile) -> None:
         raw_profile=profile.model_dump(),
     )
     with session_scope() as session:
+        # merge() matches on the primary key, but row.id is freshly generated -
+        # reuse the existing row's id so a rebuild updates it instead of
+        # violating the unique document_id constraint.
+        existing_id = session.scalar(
+            select(DocumentCanonicalProfile.id).where(
+                DocumentCanonicalProfile.document_id == document_id
+            )
+        )
+        if existing_id is not None:
+            row.id = existing_id
         session.merge(row)
         status = session.get(DocumentPipelineStatus, document_id)
         if status is None:
@@ -164,6 +186,7 @@ def main() -> None:
     arg_parser.add_argument("--chunk-size", type=int, default=100)
     arg_parser.add_argument("--company", type=str, default=None)
     arg_parser.add_argument("--category-prefix", type=str, default=None)
+    add_document_selection_args(arg_parser)
     args = arg_parser.parse_args()
 
     settings = get_settings()
@@ -176,7 +199,9 @@ def main() -> None:
     companies = [c.strip() for c in args.company.split(",")] if args.company else None
 
     with session_scope() as session:
-        pending_ids = _pending_documents(session, companies, args.category_prefix)
+        pending_ids = _pending_documents(
+            session, companies, args.category_prefix, read_document_ids(args), args.force
+        )
         if args.limit is not None:
             pending_ids = pending_ids[: args.limit]
         if not pending_ids:

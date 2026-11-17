@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from core.knowledge_base.registry import (
+    codes_mentioned,
     get_canonical_codes,
     get_canonical_codes_config,
     get_concepts,
     get_question_bank,
     get_questions_for_category,
     normalize_to_code,
+    normalize_to_earliest_code,
 )
 from core.taxonomy.registry import list_leaf_categories
 
@@ -65,6 +67,28 @@ def test_normalize_to_code_matches_synonym() -> None:
 
 def test_normalize_to_code_returns_none_for_unknown_phrase() -> None:
     assert normalize_to_code("ביטוח לכיסוי מכשירי חשמל ביתיים") is None
+
+
+def test_normalize_to_earliest_code_prefers_leading_phrase() -> None:
+    text = "פיצוי חודשי כספי (תגמול סיעודי חודשי) והחזר הוצאות שיקום"
+    assert normalize_to_earliest_code(text, "benefit_type") == "MONTHLY_ANNUITY"
+
+
+def test_normalize_to_earliest_code_recognizes_common_phrasings() -> None:
+    assert normalize_to_earliest_code("פיצוי חודשי", "benefit_type") == "MONTHLY_ANNUITY"
+    assert (
+        normalize_to_earliest_code("פיצוי כספי חד-פעמי המשולם ב-12 תשלומים חודשיים", "benefit_type")
+        == "LUMP_SUM"
+    )
+
+
+def test_normalize_to_earliest_code_returns_none_for_unknown_phrase() -> None:
+    assert normalize_to_earliest_code("ניסוח חופשי לא ידוע", "benefit_type") is None
+
+
+def test_codes_mentioned_lists_every_code_in_order() -> None:
+    text = "פיצוי חד-פעמי (במקרה מוות) ושיפוי על הוצאות רפואיות"
+    assert codes_mentioned(text, "benefit_type") == ["LUMP_SUM", "REIMBURSEMENT"]
 
 
 def test_concepts_load() -> None:

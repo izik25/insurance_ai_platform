@@ -104,3 +104,157 @@ def test_build_fingerprint_is_deterministic() -> None:
     first = build_fingerprint(**kwargs)
     second = build_fingerprint(**kwargs)
     assert first.as_dict() == second.as_dict()
+
+
+def _build(profile: CanonicalCoverageProfile, answer_statuses: dict[str, str] | None = None):
+    return build_fingerprint(
+        main_category="HEALTH",
+        coverage_family="SURGERIES",
+        coverage_subtype=None,
+        benefit_model=None,
+        target_population=None,
+        profile=profile,
+        benefit_type_code=None,
+        answer_statuses=answer_statuses,
+    )
+
+
+def test_survival_condition_in_waiting_slot_moves_to_survival() -> None:
+    text = "תקופת המתנה של 14 ימים ממועד קרות מקרה הביטוח, ובלבד שהמבוטח לא נפטר במהלך 14 הימים"
+    result = _build(_profile(waiting_period_text=text, survival_period_text=None))
+    assert result.waiting_period_days is None
+    assert result.survival_period_days == 14
+    assert result.raw_features["sanity_adjustments"]
+
+
+def test_duplicate_period_text_kept_only_where_its_wording_points() -> None:
+    text = "90 ימים. מובהר כי לא תהא תקופת אכשרה למקרה ביטוח הנגרם בשל תאונה."
+    profile = _profile(
+        waiting_period_text=text, qualifying_period_text=text, survival_period_text=None
+    )
+    result = _build(profile)
+    assert result.qualifying_period_days == 90
+    assert result.waiting_period_days is None
+
+
+def test_period_dropped_when_question_bank_found_none() -> None:
+    statuses = {
+        "base.survival_period_exists": "NOT_FOUND",
+        "base.survival_period_details": "NOT_FOUND",
+        "base.insured_event": "FOUND",
+        "base.covered_scope": "FOUND",
+        "base.exclusions": "FOUND",
+    }
+    text = "פיצוי במקרה פטירת המבוטח בתוך 14 ימים ממועד הניתוח"
+    result = _build(_profile(survival_period_text=text), statuses)
+    assert result.survival_period_days is None
+    assert result.raw_features["is_coverage_document"] is True
+
+
+def test_deductible_premium_and_per_unit_amounts_excluded_from_range() -> None:
+    amounts = [
+        "השתתפות עצמית בגין ביצוע ניתוח בסך 5,000 ₪",
+        "עלות פוליסה פרמיה חודשית: 5.00 ש\"ח",
+        "עד ₪ 250 ליום ועד 60 ימים",
+        "עד ₪ 3,000,000 שיפוי עבור תרופה שאינה כלולה בסל",
+        "פיצוי פטירה - 150,000 ₪",
+    ]
+    result = _build(_profile(amounts=amounts))
+    assert result.benefit_amount_min == 150000.0
+    assert result.benefit_amount_max == 3000000.0
+    assert result.amount_raw == amounts
+
+
+def test_entry_ages_from_premium_bands_are_dropped() -> None:
+    ages = AgeRestrictions(
+        min_age=0,
+        max_age=66,
+        termination_age=None,
+        description="דמי הביטוח משתנים לפי קבוצות גיל עד גיל 66, מגיל 66 ואילך דמי הביטוח קבועים",
+    )
+    result = _build(_profile(age_restrictions=ages))
+    assert result.min_entry_age is None
+    assert result.max_entry_age is None
+
+
+def test_max_entry_age_equal_to_termination_age_is_dropped() -> None:
+    ages = AgeRestrictions(
+        min_age=None,
+        max_age=65,
+        termination_age=65,
+        description="הכיסוי פוקע עם הגיע המבוטח לגיל 65",
+    )
+    result = _build(_profile(age_restrictions=ages))
+    assert result.max_entry_age is None
+    assert result.termination_age == 65
+
+
+def test_explicit_entry_limit_is_kept() -> None:
+    ages = AgeRestrictions(
+        min_age=18, max_age=65, termination_age=75, description="גיל הצטרפות 18 עד 65"
+    )
+    result = _build(_profile(age_restrictions=ages))
+    assert (result.min_entry_age, result.max_entry_age) == (18, 65)
+
+
+def test_document_with_almost_no_answers_is_flagged_non_coverage() -> None:
+    statuses = {"base.termination_conditions": "FOUND", "base.insured_event": "NOT_FOUND"}
+    result = _build(_profile(), statuses)
+    assert result.raw_features["is_coverage_document"] is False
+
+
+def _gated(profile: CanonicalCoverageProfile, statuses: dict[str, str], texts: dict):
+    return build_fingerprint(
+        main_category="HEALTH",
+        coverage_family="SURGERIES",
+        coverage_subtype=None,
+        benefit_model=None,
+        target_population=None,
+        profile=profile,
+        benefit_type_code=None,
+        answer_statuses=statuses,
+        answer_texts=texts,
+    )
+
+
+def test_payment_on_death_clause_is_not_a_survival_period() -> None:
+    evidence = "נפטר המבוטח בתוך 14 ימים ממועד ביצוע הניתוח, תשלם החברה פיצוי בגובה 150,000 ₪"
+    statuses = {"base.survival_period_details": "FOUND"}
+    texts = {"base.survival_period_details": ("תקופת הישרדות היא 14 ימים", evidence)}
+    profile = _profile(waiting_period_text=None, survival_period_text="14 ימים ממועד הניתוח")
+    assert _gated(profile, statuses, texts).survival_period_days is None
+
+
+def test_period_value_must_match_question_bank_answer() -> None:
+    statuses = {"base.waiting_period_details": "AMBIGUOUS"}
+    texts = {"base.waiting_period_details": ("לא ברור (0? יום)", "במשך תקופה של 0? יום")}
+    profile = _profile(
+        waiting_period_text="30 יום מהיום שבו הודיעה החברה", survival_period_text=None
+    )
+    assert _gated(profile, statuses, texts).waiting_period_days is None
+
+
+def test_period_supported_by_answer_in_other_units_is_kept() -> None:
+    statuses = {"base.waiting_period_details": "FOUND"}
+    texts = {"base.waiting_period_details": ("3 חודשים", "תקופת ההמתנה היא שלושה חודשים")}
+    profile = _profile(
+        waiting_period_text="תקופת ההמתנה היא שלושה חודשים", survival_period_text=None
+    )
+    assert _gated(profile, statuses, texts).waiting_period_days == 90
+
+
+def test_entry_ages_dropped_when_quote_is_a_price_table() -> None:
+    ages = AgeRestrictions(min_age=18, max_age=19, description="מגבלת גיל להצטרפות 18 עד 19")
+    statuses = {"base.age_limitations": "FOUND"}
+    quote = "ילד עד גיל 18 5.00 שקלים חדשים, מגיל 19"
+    texts = {"base.age_limitations": ("גיל הצטרפות 18-19", quote)}
+    result = _gated(_profile(age_restrictions=ages), statuses, texts)
+    assert (result.min_entry_age, result.max_entry_age) == (None, None)
+
+
+def test_entry_ages_kept_when_quote_states_entry_limit() -> None:
+    ages = AgeRestrictions(min_age=18, max_age=65, description="גיל כניסה 18 עד 65")
+    statuses = {"base.age_limitations": "FOUND"}
+    texts = {"base.age_limitations": ("18 עד 65", "גיל הכניסה לביטוח הוא מגיל 18 ועד גיל 65")}
+    result = _gated(_profile(age_restrictions=ages), statuses, texts)
+    assert (result.min_entry_age, result.max_entry_age) == (18, 65)
