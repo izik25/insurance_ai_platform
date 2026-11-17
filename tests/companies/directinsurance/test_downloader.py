@@ -58,9 +58,10 @@ def test_refs_from_search_response_parses_real_shaped_entry() -> None:
     assert ref.form_type == "פוליסה וכתבי שירות"
     assert ref.sale_group == "מקרה מוות"
     assert ref.download_url == "https://www.555.co.il/webapp/api/siteapi/form/openform/9214"
-    # This site's formName wording doesn't use "נספח <n>" - defensively
-    # parsed but expected empty here.
-    assert ref.appendix_numbers == []
+    # This site's formName wording doesn't use "נספח <n>" - the bare
+    # "<code>/<rev>" fallback (_appendix_numbers_from_title) picks up the
+    # native code instead.
+    assert ref.appendix_numbers == ["195/01"]
 
 
 def test_refs_from_search_response_parses_appendix_number_when_present() -> None:

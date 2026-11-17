@@ -32,7 +32,9 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
+
+from core.extraction.appendix_number import split_appendix_number_list
 
 
 class Base(DeclarativeBase):
@@ -77,6 +79,13 @@ class Document(Base):
     )
 
     company: Mapped[Company] = relationship(back_populates="documents")
+
+    @validates("appendix_number")
+    def _split_joined_appendix_numbers(self, _key: str, value: list[str] | None) -> list[str]:
+        """Every write path (each sync script, the LLM backfill, manual
+        fixes) goes through here, so a "804,931,851" list from any source
+        is stored as separate, individually searchable numbers."""
+        return split_appendix_number_list(value or [])
 
     @property
     def is_active(self) -> bool:

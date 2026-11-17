@@ -33,6 +33,7 @@ from core.config.settings import Settings, get_settings  # noqa: E402
 from core.database.models import Document, DocumentExtraction  # noqa: E402
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.exceptions import ConfigurationError, OcrError, PdfProcessingError  # noqa: E402
+from core.extraction.appendix_number import split_appendix_number_list  # noqa: E402
 from core.extraction.llm_extract import (  # noqa: E402
     collect_extraction_results,
     submit_extraction_batch,
@@ -66,6 +67,16 @@ def _read_texts(
     return texts
 
 
+# Customer-service "*NNNN" phone short-codes printed in every page footer.
+# The LLM has been confirmed to read these as the appendix number on
+# documents that print no real one (Hachshara: 65 forms/appendices tagged
+# "3453", found 2026-10-11) - never accept them as an appendix number.
+_COMPANY_PHONE_SHORTCODES: dict[str, frozenset[str]] = {
+    "hachshara": frozenset({"3453"}),
+    "harel": frozenset({"2735"}),
+}
+
+
 def _backfill_appendix_metadata(
     session: Session, document_id: str, extraction: PolicyExtraction
 ) -> None:
@@ -79,8 +90,14 @@ def _backfill_appendix_metadata(
     document = session.get(Document, document_id)
     if document is None:
         return
-    if not document.appendix_number and extraction.appendix_number:
-        document.appendix_number = extraction.appendix_number
+    shortcodes = _COMPANY_PHONE_SHORTCODES.get(document.company_id, frozenset())
+    llm_numbers = [
+        n
+        for n in split_appendix_number_list(extraction.appendix_number or [])
+        if n.strip() not in shortcodes
+    ]
+    if not document.appendix_number and llm_numbers:
+        document.appendix_number = llm_numbers
     if not document.appendix_name and extraction.appendix_name:
         document.appendix_name = extraction.appendix_name
 

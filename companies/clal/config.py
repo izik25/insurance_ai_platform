@@ -75,7 +75,15 @@ class ClalConfig(CompanyConfig):
     # cancer/critical-illness cover). Both need to be queried per domain to
     # get the full archive; id 9 returned 0 extra for life, but it's cheap
     # to keep checking both per domain rather than hard-code that asymmetry.
-    company_filter_ids: list[str] = Field(default_factory=lambda: ["1", "9"])
+    # Confirmed live (2026-08-24): for every Family tried, the blank/default
+    # Company value ("") is a strict superset of the union of "1" and "9" -
+    # e.g. Family 1520 (health) returns 88 documents under "" that neither
+    # "1" nor "9" surface, Family 8277 (life) returns 112. Kept "1"/"9"
+    # explicit rather than replacing them with just [""] since that
+    # superset relationship wasn't exhaustively verified across every
+    # Family - list_documents() dedupes by download_url, so querying all
+    # three is redundant-safe, not wasteful of correctness.
+    company_filter_ids: list[str] = Field(default_factory=lambda: ["1", "9", ""])
 
     request_timeout_seconds: float = 30.0
     download_delay_seconds: float = Field(default=0.2, ge=0.0)

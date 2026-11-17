@@ -39,3 +39,10 @@ def test_is_active_true_when_end_date_is_today() -> None:
 def test_is_active_false_when_end_date_has_passed() -> None:
     doc = _document(marketing_end_date=date.today() - timedelta(days=1))
     assert doc.is_active is False
+
+
+def test_appendix_number_list_string_split_on_assignment() -> None:
+    doc = _document(appendix_number=["945,946,947", "928"])
+    assert doc.appendix_number == ["945", "946", "947", "928"]
+    doc.appendix_number = ["801,802"]
+    assert doc.appendix_number == ["801", "802"]

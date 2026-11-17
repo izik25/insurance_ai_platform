@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.extraction.appendix_number import find_appendix_numbers
+from core.extraction.appendix_number import find_appendix_numbers, split_appendix_number_list
 
 
 def test_single_appendix_number() -> None:
@@ -55,3 +55,38 @@ def test_appendix_mention_with_mas_abbreviation() -> None:
     # to follow "נספח" directly and didn't know about the "מס'" ("no.")
     # abbreviation some documents insert in between.
     assert find_appendix_numbers("נספח מס'-801-806/91") == ["801", "806"]
+
+
+def test_split_harel_booklet_rider_list() -> None:
+    """Real Harel archive cell - the whole rider list in one string."""
+    assert split_appendix_number_list(["804,931,851,929,805א', 904,945,946,947"]) == [
+        "804", "931", "851", "929", "805א'", "904", "945", "946", "947",
+    ]
+
+
+def test_split_space_separated_with_parenthesized_letter() -> None:
+    assert split_appendix_number_list(["985 986 805 (א')990 945"]) == [
+        "985", "986", "805(א')", "990", "945",
+    ]
+
+
+def test_split_drops_leading_commas_and_all_zero_tokens() -> None:
+    assert split_appendix_number_list([",,892,805א',896"]) == ["892", "805א'", "896"]
+    assert split_appendix_number_list(["896,851,929,805,904,000,000,000"]) == [
+        "896", "851", "929", "805", "904",
+    ]
+
+
+def test_split_leaves_single_and_slash_or_range_values_alone() -> None:
+    assert split_appendix_number_list(["302"]) == ["302"]
+    assert split_appendix_number_list(["818 א'"]) == ["818 א'"]
+    assert split_appendix_number_list(["45/02", "25/01 פריט 3077"]) == ["45/02", "25/01 פריט 3077"]
+    assert split_appendix_number_list(["970-971"]) == ["970-971"]
+
+
+def test_split_keeps_value_with_words_between_numbers() -> None:
+    assert split_appendix_number_list(["9227 923 נספח"]) == ["9227 923 נספח"]
+
+
+def test_split_deduplicates_across_values() -> None:
+    assert split_appendix_number_list(["857,908", "908", "833"]) == ["857", "908", "833"]

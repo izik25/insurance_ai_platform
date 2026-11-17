@@ -47,9 +47,16 @@ No appendix-number field exists in this API's response (unlike
 Phoenix/Clal/Menorah) - `formName` values look like "<product name>
 <code>/<rev> - מהדורה <date>" (e.g. "195/01") rather than the "נספח
 <number>" wording `find_appendix_numbers` looks for, so it's applied
-defensively but is expected to return [] for most/all documents here;
-that's fine, per the project's "trust the source, else backfill via LLM"
-rule.
+first but is expected to return [] for most documents here. When it does,
+`_BARE_CODE_RE` catches this site's own native "<code>/<rev>" token
+straight from the title as a fallback (confirmed live 2026-08-20: found
+via a retroactive DB audit that a handful of titles like "תנאים כלליים -
+ביטוח בריאות 24/04" or "גילוי נאות - תרופות והשתלות 73/01" carry a clean
+trailing code that neither this regex nor the LLM backfill had caught -
+both scoped to a "נספח" keyword, so a bare-code sync still needs this
+second pass). Together they're expected to return [] for the genuine
+non-appendix documents (application/claim forms, medical questionnaires,
+general disclosure reports).
 
 Each result also carries `fromDate`/`toDate` (DD/MM/YYYY strings) -
 confirmed live (2026-08-10) as a genuine validity window, the same role as
@@ -72,6 +79,7 @@ config.py for why those were kept as-is rather than reclassified.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -89,6 +97,19 @@ from core.utils.hashing import sha256_of_bytes, sha256_of_file
 from core.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# This site's own native "<code>/<rev>" token (e.g. "24/04", "73/01") -
+# fallback when find_appendix_numbers (which requires a "נספח" keyword)
+# comes up empty. See module docstring.
+_BARE_CODE_RE = re.compile(r"(?<!\d)(\d{1,3}/\d{2,3})(?!\d)")
+
+
+def _appendix_numbers_from_title(title: str) -> list[str]:
+    found = find_appendix_numbers(title)
+    if found:
+        return found
+    match = _BARE_CODE_RE.search(title)
+    return [match.group(1)] if match else []
 
 _BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -165,7 +186,7 @@ def refs_from_search_response(
                 title=title,
                 form_type=item.get("typeDsc") or "",
                 sale_group=item.get("saleDsc") or "",
-                appendix_numbers=find_appendix_numbers(title),
+                appendix_numbers=_appendix_numbers_from_title(title),
                 download_url=config.download_url_template.format(form_id=form_id),
                 marketing_start_date=_parse_date(item.get("fromDate")),
                 marketing_end_date=_parse_date(item.get("toDate")),
