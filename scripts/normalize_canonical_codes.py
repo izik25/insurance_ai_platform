@@ -10,6 +10,7 @@ unmapped (no DocumentCanonicalCode row), not invented as a new code.
 Usage: python scripts/normalize_canonical_codes.py [--limit N] [--chunk-size N]
        [--company migdal,phoenix] [--category-prefix health.critical_illness]
        [--no-llm-fallback]
+       [--document-ids ID1,ID2 | --document-ids-file ids.txt] [--force]
 """
 
 from __future__ import annotations
@@ -46,15 +47,20 @@ from core.database.models import (  # noqa: E402
 )
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.exceptions import ConfigurationError  # noqa: E402
+from core.utils.document_selection import add_document_selection_args, read_document_ids  # noqa: E402
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
 
 def _pending_documents(
-    session: Session, companies: list[str] | None, category_prefix: str | None
+    session: Session,
+    companies: list[str] | None,
+    category_prefix: str | None,
+    document_ids: set[str] | None = None,
+    force: bool = False,
 ) -> list[str]:
-    already_current = set(
+    already_current = set() if force else set(
         session.scalars(
             select(DocumentPipelineStatus.document_id).where(
                 DocumentPipelineStatus.canonical_codes_version == CODES_VERSION
@@ -74,6 +80,8 @@ def _pending_documents(
     )
     if companies:
         query = query.where(Document.company_id.in_(companies))
+    if document_ids is not None:
+        query = query.where(Document.id.in_(document_ids))
 
     pending = []
     for document_id, category_id in session.execute(query):
@@ -124,6 +132,7 @@ def main() -> None:
     arg_parser.add_argument("--company", type=str, default=None)
     arg_parser.add_argument("--category-prefix", type=str, default=None)
     arg_parser.add_argument("--no-llm-fallback", action="store_true")
+    add_document_selection_args(arg_parser)
     args = arg_parser.parse_args()
 
     settings = get_settings()
@@ -133,7 +142,9 @@ def main() -> None:
     companies = [c.strip() for c in args.company.split(",")] if args.company else None
 
     with session_scope() as session:
-        pending_ids = _pending_documents(session, companies, args.category_prefix)
+        pending_ids = _pending_documents(
+            session, companies, args.category_prefix, read_document_ids(args), args.force
+        )
         if args.limit is not None:
             pending_ids = pending_ids[: args.limit]
         if not pending_ids:

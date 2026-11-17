@@ -34,6 +34,12 @@ LLM-judge implementation.
 Usage: python scripts/match_documents_v2.py [--company migdal,phoenix]
        [--category-prefix health.critical_illness] [--limit N]
        [--skip-deep-verification]
+       [--document-ids ID1,ID2 | --document-ids-file ids.txt]
+
+--document-ids restricts BOTH the source documents and the candidate pool to
+exactly that set (a closed pilot: e.g. 10 documents already rebuilt at the
+current fingerprint version, matched only against each other). Only pairs
+inside the set are deleted/rewritten, as for any other scoped run.
 """
 
 from __future__ import annotations
@@ -73,6 +79,7 @@ from core.matching.orchestrator import (  # noqa: E402
 )
 from core.matching.semantic_judge import DocumentJudgeInfo, JudgeVerdict, judge_pairs_concurrent  # noqa: E402
 from core.models.enums import MatchStatus  # noqa: E402
+from core.utils.document_selection import read_document_ids  # noqa: E402
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
@@ -82,7 +89,10 @@ _JUDGE_CONCURRENCY = 100
 
 
 def _load_features_and_index(
-    session: Session, companies: list[str] | None, category_prefix: str | None
+    session: Session,
+    companies: list[str] | None,
+    category_prefix: str | None,
+    document_ids: set[str] | None = None,
 ) -> tuple[dict[str, FingerprintFeatures], CandidateIndex]:
     query = (
         select(Document, DocumentClassification, DocumentFingerprint)
@@ -93,6 +103,8 @@ def _load_features_and_index(
         query = query.where(Document.company_id.in_(companies))
     if category_prefix:
         query = query.where(DocumentClassification.category_id.like(f"{category_prefix}%"))
+    if document_ids is not None:
+        query = query.where(Document.id.in_(document_ids))
     rows = session.execute(query).all()
     document_ids = [document.id for document, _c, _f in rows]
 
@@ -236,7 +248,10 @@ def main() -> None:
     arg_parser.add_argument("--category-prefix", type=str, default=None)
     arg_parser.add_argument("--limit", type=int, default=None, help="Cap on source documents (for a pilot run)")
     arg_parser.add_argument("--skip-deep-verification", action="store_true")
+    arg_parser.add_argument("--document-ids", type=str, default=None, help="Comma-separated document ids")
+    arg_parser.add_argument("--document-ids-file", type=Path, default=None, help="One document id per line")
     args = arg_parser.parse_args()
+    args.force = False  # read_document_ids() expects it; matching has no version cache to bypass
 
     settings = get_settings()
     configure_logging(settings)
@@ -245,7 +260,9 @@ def main() -> None:
     companies = [c.strip() for c in args.company.split(",")] if args.company else None
 
     with session_scope() as session:
-        features_by_id, index = _load_features_and_index(session, companies, args.category_prefix)
+        features_by_id, index = _load_features_and_index(
+            session, companies, args.category_prefix, read_document_ids(args)
+        )
         if args.limit is not None and len(features_by_id) > args.limit:
             keep_ids = set(list(features_by_id.keys())[: args.limit])
             features_by_id = {k: v for k, v in features_by_id.items() if k in keep_ids}
