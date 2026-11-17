@@ -187,3 +187,30 @@ def test_returns_one_result_per_other_company() -> None:
 def test_unknown_document_id_returns_empty() -> None:
     index = CandidateIndex([])
     assert run_stage_a_for_document("does-not-exist", {}, index) == {}
+
+
+def test_low_ranking_score_still_reaches_the_judge_by_default() -> None:
+    """45-appendix pilot: same-category candidates scoring 0.42-0.59 on code
+    overlap were hidden from the judge entirely."""
+    source = _features(document_id="ayalon:a", company_id="ayalon", codes={"insured_event": {"SURGERY_ISRAEL"}})
+    candidate = _features(
+        document_id="migdal:a",
+        company_id="migdal",
+        waiting_period_days=None,
+        maximum_benefit=None,
+        codes={"insured_event": {"SECOND_OPINION"}, "covered_event": {"X"}},
+    )
+    features_by_id = {source.document_id: source, candidate.document_id: candidate}
+    index = CandidateIndex(
+        [
+            CandidateIndexEntry(source.document_id, source.company_id, source.category_id, True),
+            CandidateIndexEntry(candidate.document_id, candidate.company_id, candidate.category_id, True),
+        ]
+    )
+
+    outcome = run_stage_a_for_document(source.document_id, features_by_id, index)["migdal"]
+    assert outcome.final_score < 0.6
+    assert outcome.match_stage == NEEDS_DEEP_VERIFICATION
+
+    gated = run_stage_a_for_document(source.document_id, features_by_id, index, min_score_for_judge=0.9)
+    assert "migdal" not in gated

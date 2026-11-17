@@ -69,6 +69,7 @@ def run_stage_a_for_document(
     features_by_id: dict[str, FingerprintFeatures],
     index: CandidateIndex,
     auto_confirm_on_score: bool = False,
+    min_score_for_judge: float = 0.0,
 ) -> dict[str, MatchOutcome]:
     """Returns company_id -> best MatchOutcome for `document_id` - at most
     one per other company present among its category-scoped, hard-
@@ -108,7 +109,10 @@ def run_stage_a_for_document(
             # question-bank answers. Score-only auto-confirmation produced
             # 1.0s built on a single shared code per dimension, and passed a
             # breast/uterine-only appendix as a general-cancer match at 0.87.
-            if best_score.final_score < thresholds.ambiguous:
+            # No score floor by default: on the 45-appendix pilot the
+            # code-overlap score (0.42-0.59) hid the only same-category
+            # candidates of 4 appendices from the judge entirely.
+            if best_score.final_score < min_score_for_judge:
                 continue
             status, stage = "pending_review", NEEDS_DEEP_VERIFICATION
         elif (
@@ -150,13 +154,14 @@ def run_stage_a(
     features_by_id: dict[str, FingerprintFeatures],
     index: CandidateIndex,
     auto_confirm_on_score: bool = False,
+    min_score_for_judge: float = 0.0,
 ) -> list[MatchOutcome]:
     """Stage A for every document in `features_by_id` - the full-corpus (or
     full-scope) entry point scripts/match_documents_v2.py calls."""
     outcomes: list[MatchOutcome] = []
     for document_id in features_by_id:
         for outcome in run_stage_a_for_document(
-            document_id, features_by_id, index, auto_confirm_on_score
+            document_id, features_by_id, index, auto_confirm_on_score, min_score_for_judge
         ).values():
             outcomes.append(outcome)
     return outcomes

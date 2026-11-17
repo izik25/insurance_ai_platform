@@ -377,6 +377,13 @@ def main() -> None:
         help="Old policy: auto-confirm high-score pairs without the judge",
     )
     arg_parser.add_argument(
+        "--min-judge-score",
+        type=float,
+        default=0.0,
+        help="Only send a company's best candidate to the judge at or above this ranking score "
+        "(cost control; default 0 = every same-category candidate that passes hard constraints)",
+    )
+    arg_parser.add_argument(
         "--audit-file",
         type=Path,
         default=None,
@@ -411,7 +418,9 @@ def main() -> None:
         logger.info("Nothing to match - no documents matched the given filters.")
         return
 
-    outcomes = run_stage_a(features_by_id, index, args.auto_confirm_on_score)
+    outcomes = run_stage_a(
+        features_by_id, index, args.auto_confirm_on_score, args.min_judge_score
+    )
     logger.info("Stage A produced %d candidate outcomes.", len(outcomes))
     dropped: list[MatchOutcome] = []
 
