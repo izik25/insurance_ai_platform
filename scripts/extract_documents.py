@@ -19,6 +19,7 @@ Usage: python scripts/extract_documents.py [--limit N] [--chunk-size N]
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -76,6 +77,14 @@ _COMPANY_PHONE_SHORTCODES: dict[str, frozenset[str]] = {
     "harel": frozenset({"2735"}),
 }
 
+# Companies that publish no appendix numbers at all (AIG titles are product
+# name + effective dates - see companies/aig/downloader.py). The LLM still
+# "found" one on 42 AIG documents (2026-11-18): section/attachment numbers
+# like "1", "1,2", "9,4,7" or "4.1". Short or dotted values are never
+# accepted for these companies.
+_COMPANIES_WITHOUT_APPENDIX_NUMBERS = frozenset({"aig"})
+_SECTION_LIKE_NUMBER = re.compile(r"\d{1,2}|\d+\.\d+")
+
 
 def _backfill_appendix_metadata(
     session: Session, document_id: str, extraction: PolicyExtraction
@@ -95,6 +104,10 @@ def _backfill_appendix_metadata(
         n
         for n in split_appendix_number_list(extraction.appendix_number or [])
         if n.strip() not in shortcodes
+        and not (
+            document.company_id in _COMPANIES_WITHOUT_APPENDIX_NUMBERS
+            and _SECTION_LIKE_NUMBER.fullmatch(n.strip())
+        )
     ]
     if not document.appendix_number and llm_numbers:
         document.appendix_number = llm_numbers
