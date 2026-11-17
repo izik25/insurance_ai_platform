@@ -59,12 +59,16 @@ class MatchOutcome:
     # core.matching.semantic_judge) actually ran for this outcome.
     auditor_verdict: str | None = None
     auditor_reasoning: str | None = None
+    # [{topic, document_a, document_b}] - the judge's list of material
+    # differences between the two documents (A = document_id side).
+    material_differences: list[dict] | None = None
 
 
 def run_stage_a_for_document(
     document_id: str,
     features_by_id: dict[str, FingerprintFeatures],
     index: CandidateIndex,
+    auto_confirm_on_score: bool = False,
 ) -> dict[str, MatchOutcome]:
     """Returns company_id -> best MatchOutcome for `document_id` - at most
     one per other company present among its category-scoped, hard-
@@ -97,7 +101,17 @@ def run_stage_a_for_document(
         margin = (best_score.final_score - second_score) if second_score is not None else None
 
         thresholds = profile.thresholds
-        if (
+        if not auto_confirm_on_score:
+            # Default since the 2026-11 cancer pilot: the score only ranks and
+            # filters candidates; every candidate above the ambiguous band is
+            # confirmed or dropped by the LLM judge comparing both documents'
+            # question-bank answers. Score-only auto-confirmation produced
+            # 1.0s built on a single shared code per dimension, and passed a
+            # breast/uterine-only appendix as a general-cancer match at 0.87.
+            if best_score.final_score < thresholds.ambiguous:
+                continue
+            status, stage = "pending_review", NEEDS_DEEP_VERIFICATION
+        elif (
             best_score.final_score >= thresholds.auto_match
             and best_score.weight_covered_fraction >= _MIN_WEIGHT_COVERAGE_FOR_AUTO_CONFIRM
         ):
@@ -133,12 +147,16 @@ def run_stage_a_for_document(
 
 
 def run_stage_a(
-    features_by_id: dict[str, FingerprintFeatures], index: CandidateIndex
+    features_by_id: dict[str, FingerprintFeatures],
+    index: CandidateIndex,
+    auto_confirm_on_score: bool = False,
 ) -> list[MatchOutcome]:
     """Stage A for every document in `features_by_id` - the full-corpus (or
     full-scope) entry point scripts/match_documents_v2.py calls."""
     outcomes: list[MatchOutcome] = []
     for document_id in features_by_id:
-        for outcome in run_stage_a_for_document(document_id, features_by_id, index).values():
+        for outcome in run_stage_a_for_document(
+            document_id, features_by_id, index, auto_confirm_on_score
+        ).values():
             outcomes.append(outcome)
     return outcomes

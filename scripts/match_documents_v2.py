@@ -46,8 +46,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from collections import defaultdict
+from dataclasses import asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -65,19 +67,29 @@ from core.database.models import (  # noqa: E402
     DocumentExtraction,
     DocumentFingerprint,
     DocumentMatch,
+    DocumentQuestionAnswer,
 )
 from core.database.session import init_db, session_scope  # noqa: E402
 from core.exceptions import ConfigurationError  # noqa: E402
+from core.knowledge_base.registry import get_questions_for_category  # noqa: E402
 from core.matching.candidate_index import CandidateIndex, CandidateIndexEntry  # noqa: E402
 from core.matching.hard_constraints import FingerprintFeatures  # noqa: E402
-from core.matching.mutual_validation import compute_group_validation, compute_mutual_matches  # noqa: E402
+from core.matching.mutual_validation import (  # noqa: E402
+    compute_group_validation,
+    compute_mutual_matches,
+)
 from core.matching.orchestrator import (  # noqa: E402
     DEEP_VERIFIED,
     NEEDS_DEEP_VERIFICATION,
     MatchOutcome,
     run_stage_a,
 )
-from core.matching.semantic_judge import DocumentJudgeInfo, JudgeVerdict, judge_pairs_concurrent  # noqa: E402
+from core.matching.semantic_judge import (  # noqa: E402
+    DocumentJudgeInfo,
+    JudgeAnswer,
+    JudgeVerdict,
+    judge_pairs_concurrent,
+)
 from core.models.enums import MatchStatus  # noqa: E402
 from core.utils.document_selection import read_document_ids  # noqa: E402
 from core.utils.logging import configure_logging, get_logger  # noqa: E402
@@ -162,14 +174,88 @@ def _embedding_similarity(
     return float(np.dot(a, b))  # pre-normalized vectors (core.embeddings.model.embed_texts)
 
 
+# Fingerprint fields shown to the judge next to the answers.
+_JUDGE_FINGERPRINT_FIELDS = (
+    ("waiting_period_days", "תקופת המתנה (ימים)"),
+    ("qualifying_period_days", "תקופת אכשרה (ימים)"),
+    ("survival_period_days", "תקופת הישרדות (ימים)"),
+    ("min_entry_age", "גיל כניסה מינימלי"),
+    ("max_entry_age", "גיל כניסה מקסימלי"),
+    ("termination_age", "גיל סיום כיסוי"),
+    ("benefit_type", "סוג תגמול"),
+    ("benefit_amount_max", "סכום ביטוח מקסימלי"),
+    ("maximum_benefit", "תקרת תגמול"),
+    ("target_population", "אוכלוסיית יעד"),
+)
+
+
 def _build_judge_info(session: Session, document_ids: set[str]) -> dict[str, DocumentJudgeInfo]:
+    """The judge's view of each document: its question-bank answers (the
+    same questions for every document in a category, answered from the full
+    text) plus its fingerprint. Falls back to the old extraction fields only
+    for a document that has no question-bank answers yet."""
     if not document_ids:
         return {}
     info: dict[str, DocumentJudgeInfo] = {}
+
+    answers_by_doc: dict[str, list[DocumentQuestionAnswer]] = defaultdict(list)
+    for answer in session.scalars(
+        select(DocumentQuestionAnswer).where(DocumentQuestionAnswer.document_id.in_(document_ids))
+    ):
+        answers_by_doc[answer.document_id].append(answer)
+    category_by_doc = dict(
+        session.execute(
+            select(DocumentClassification.document_id, DocumentClassification.category_id).where(
+                DocumentClassification.document_id.in_(document_ids)
+            )
+        ).all()
+    )
+    fingerprint_by_doc = {
+        fp.document_id: fp
+        for fp in session.scalars(
+            select(DocumentFingerprint).where(DocumentFingerprint.document_id.in_(document_ids))
+        )
+    }
+
+    for document in session.scalars(select(Document).where(Document.id.in_(document_ids))):
+        answers = answers_by_doc.get(document.id)
+        if not answers:
+            continue
+        category_id = category_by_doc.get(document.id)
+        question_text = (
+            {q.question_id: q.text_he for q in get_questions_for_category(category_id)}
+            if category_id
+            else {}
+        )
+        fingerprint = fingerprint_by_doc.get(document.id)
+        fingerprint_view = {}
+        if fingerprint is not None:
+            for field_name, label in _JUDGE_FINGERPRINT_FIELDS:
+                value = getattr(fingerprint, field_name)
+                if value is not None:
+                    fingerprint_view[label] = f"{value:g}" if isinstance(value, float) else str(value)
+        info[document.id] = DocumentJudgeInfo(
+            company_id=document.company_id,
+            appendix_name=document.appendix_name,
+            category_id=category_id,
+            fingerprint=fingerprint_view,
+            answers=[
+                JudgeAnswer(
+                    question=question_text.get(a.question_id, a.question_id),
+                    status=a.status,
+                    answer=a.answer_text,
+                )
+                for a in sorted(answers, key=lambda a: a.question_id)
+            ],
+        )
+
+    missing = document_ids - set(info)
+    if not missing:
+        return info
     rows = session.execute(
         select(Document, DocumentExtraction)
         .join(DocumentExtraction, DocumentExtraction.document_id == Document.id)
-        .where(Document.id.in_(document_ids))
+        .where(Document.id.in_(missing))
     )
     for document, extraction in rows:
         info[document.id] = DocumentJudgeInfo(
@@ -194,37 +280,53 @@ def _run_deep_verification(
     model: str, api_key: str, pending: list[MatchOutcome], judge_info: dict[str, DocumentJudgeInfo]
 ) -> list[MatchOutcome]:
     """Judges every `pending` (NEEDS_DEEP_VERIFICATION) outcome and returns
-    the resolved list - same_coverage upgrades to auto_confirmed,
-    different_coverage drops the outcome entirely, uncertain (or a failed
-    judge call) falls back to pending_review. Reuses
-    core.matching.semantic_judge.judge_pairs_concurrent unmodified."""
+    (resolved, dropped) - same_coverage upgrades to auto_confirmed,
+    different_coverage moves the outcome to `dropped` (not saved to
+    document_matches, but kept for the audit file), uncertain (or a failed
+    judge call, or a document the judge has no data for) stays
+    pending_review.
+
+    Each unordered pair is judged ONCE and the verdict applied to both
+    directions (A->B and B->A are the same question; judging them separately
+    cost twice as much and could disagree with itself). The judge's
+    "document A" is the lexicographically smaller id; material differences
+    are re-oriented so document_a is always the outcome's own document."""
+    pair_key = lambda o: tuple(sorted((o.document_id, o.matched_document_id)))  # noqa: E731
     pairs: dict[str, tuple[DocumentJudgeInfo, DocumentJudgeInfo]] = {}
-    pair_id_to_outcome: dict[str, MatchOutcome] = {}
+    unjudgeable: list[MatchOutcome] = []
     for outcome in pending:
-        doc_a = judge_info.get(outcome.document_id)
-        doc_b = judge_info.get(outcome.matched_document_id)
-        if doc_a is None or doc_b is None:
+        first, second = pair_key(outcome)
+        if first not in judge_info or second not in judge_info:
+            unjudgeable.append(outcome)
             continue
-        pair_id = f"{outcome.document_id}:{outcome.matched_document_id}"
-        pairs[pair_id] = (doc_a, doc_b)
-        pair_id_to_outcome[pair_id] = outcome
+        pairs.setdefault(f"{first}|{second}", (judge_info[first], judge_info[second]))
 
-    if not pairs:
-        return []
-
-    logger.info("Stage B: sending %d pairs to the LLM judge for deep verification.", len(pairs))
     verdicts: dict[str, JudgeVerdict | None] = {}
+    if pairs:
+        logger.info(
+            "Stage B: sending %d unique pairs (%d directed outcomes) to the LLM judge.",
+            len(pairs),
+            len(pending) - len(unjudgeable),
+        )
 
-    def _on_result(pair_id: str, verdict: JudgeVerdict | None) -> None:
-        verdicts[pair_id] = verdict
-        if len(verdicts) % 25 == 0:
-            logger.info("Stage B progress: %d/%d judged", len(verdicts), len(pairs))
+        def _on_result(pair_id: str, verdict: JudgeVerdict | None) -> None:
+            verdicts[pair_id] = verdict
+            if len(verdicts) % 25 == 0:
+                logger.info("Stage B progress: %d/%d judged", len(verdicts), len(pairs))
 
-    asyncio.run(judge_pairs_concurrent(model, pairs, _JUDGE_CONCURRENCY, _on_result, api_key))
+        asyncio.run(judge_pairs_concurrent(model, pairs, _JUDGE_CONCURRENCY, _on_result, api_key))
 
     resolved: list[MatchOutcome] = []
-    for pair_id, outcome in pair_id_to_outcome.items():
-        verdict = verdicts.get(pair_id)
+    dropped: list[MatchOutcome] = []
+    for outcome in unjudgeable:
+        outcome.status = "pending_review"
+        resolved.append(outcome)
+    unjudgeable_objects = {id(o) for o in unjudgeable}
+    for outcome in pending:
+        if id(outcome) in unjudgeable_objects:
+            continue
+        first, second = pair_key(outcome)
+        verdict = verdicts.get(f"{first}|{second}")
         if verdict is None:
             outcome.status = "pending_review"
             resolved.append(outcome)
@@ -232,14 +334,33 @@ def _run_deep_verification(
         outcome.match_stage = DEEP_VERIFIED
         outcome.auditor_verdict = verdict.verdict
         outcome.auditor_reasoning = verdict.reasoning
+        own_is_a = outcome.document_id == first
+        # The two axes the verdict is computed from, oriented to this
+        # outcome (narrower_in_a = narrower in outcome.document_id).
+        event = verdict.core_insured_event
+        if not own_is_a and event in ("narrower_in_a", "narrower_in_b"):
+            event = "narrower_in_b" if event == "narrower_in_a" else "narrower_in_a"
+        outcome.score_breakdown["judge"] = {
+            "core_insured_event": event,
+            "core_payment_mechanism": verdict.core_payment_mechanism,
+        }
+        outcome.material_differences = [
+            {
+                "topic": d.topic,
+                "document_a": d.document_a if own_is_a else d.document_b,
+                "document_b": d.document_b if own_is_a else d.document_a,
+            }
+            for d in verdict.material_differences
+        ]
         if verdict.verdict == "same_coverage":
             outcome.status = "auto_confirmed"
             resolved.append(outcome)
         elif verdict.verdict == "uncertain":
             outcome.status = "pending_review"
             resolved.append(outcome)
-        # different_coverage: dropped entirely - not appended to `resolved`.
-    return resolved
+        else:
+            dropped.append(outcome)
+    return resolved, dropped
 
 
 def main() -> None:
@@ -250,6 +371,17 @@ def main() -> None:
     arg_parser.add_argument("--skip-deep-verification", action="store_true")
     arg_parser.add_argument("--document-ids", type=str, default=None, help="Comma-separated document ids")
     arg_parser.add_argument("--document-ids-file", type=Path, default=None, help="One document id per line")
+    arg_parser.add_argument(
+        "--auto-confirm-on-score",
+        action="store_true",
+        help="Old policy: auto-confirm high-score pairs without the judge",
+    )
+    arg_parser.add_argument(
+        "--audit-file",
+        type=Path,
+        default=None,
+        help="Write every Stage A outcome (incl. pairs the judge dropped) as JSON",
+    )
     args = arg_parser.parse_args()
     args.force = False  # read_document_ids() expects it; matching has no version cache to bypass
 
@@ -279,8 +411,9 @@ def main() -> None:
         logger.info("Nothing to match - no documents matched the given filters.")
         return
 
-    outcomes = run_stage_a(features_by_id, index)
+    outcomes = run_stage_a(features_by_id, index, args.auto_confirm_on_score)
     logger.info("Stage A produced %d candidate outcomes.", len(outcomes))
+    dropped: list[MatchOutcome] = []
 
     fast_final = [o for o in outcomes if o.match_stage != NEEDS_DEEP_VERIFICATION]
     needs_deep = [o for o in outcomes if o.match_stage == NEEDS_DEEP_VERIFICATION]
@@ -291,8 +424,8 @@ def main() -> None:
         judge_ids = {o.document_id for o in needs_deep} | {o.matched_document_id for o in needs_deep}
         with session_scope() as session:
             judge_info = _build_judge_info(session, judge_ids)
-        deep_resolved = _run_deep_verification(
-            settings.extraction_model, settings.openai_api_key, needs_deep, judge_info
+        deep_resolved, dropped = _run_deep_verification(
+            settings.judge_model, settings.openai_api_key, needs_deep, judge_info
         )
         logger.info(
             "Stage B resolved %d/%d pairs (rest dropped as different_coverage).",
@@ -306,7 +439,7 @@ def main() -> None:
     else:
         final_outcomes = fast_final
 
-    for outcome in final_outcomes:
+    for outcome in final_outcomes + dropped:
         similarity = _embedding_similarity(embeddings_by_doc, outcome.document_id, outcome.matched_document_id)
         if similarity is not None:
             outcome.score_breakdown["semantic_embedding_similarity"] = round(similarity, 4)
@@ -364,10 +497,31 @@ def main() -> None:
             matching_profile_version=outcome.matching_profile_version,
             auditor_verdict=outcome.auditor_verdict,
             auditor_reasoning=outcome.auditor_reasoning,
+            material_differences=outcome.material_differences,
         )
         with session_scope() as session:
             session.merge(row)
         saved += 1
+
+    if args.audit_file:
+        saved_objects = {id(o) for o in final_outcomes}
+        audit = [
+            {
+                **asdict(o),
+                "saved": id(o) in saved_objects,
+                "mutual_match": mutual.get((o.document_id, o.matched_document_id)),
+            }
+            for o in final_outcomes + dropped
+        ]
+        args.audit_file.write_text(
+            json.dumps(audit, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        logger.info(
+            "Audit file written: %s (%d outcomes, %d dropped by the judge)",
+            args.audit_file,
+            len(audit),
+            len(dropped),
+        )
 
     logger.info(
         "Done. saved=%d skipped_protected=%d auto_confirmed=%d pending_review=%d",

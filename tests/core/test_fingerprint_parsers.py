@@ -86,3 +86,19 @@ class TestParsePercentage:
     def test_none_for_empty_or_none(self) -> None:
         assert parse_percentage(None) is None
         assert parse_percentage("") is None
+
+
+def test_reversed_rtl_period_order_is_parsed() -> None:
+    """Phoenix 5630 (2026-11 cancer pilot): PDF reading order put the number
+    after its unit."""
+    from core.fingerprint.parsers import parse_period_to_days
+
+    text = "הימים הראשונים 90 תקופת האכשרה תחל מיום תחילת תוקפה של תכנית זו ועד חלוף"
+    assert parse_period_to_days(text) == 90
+
+
+def test_reversed_fallback_never_beats_normal_order_or_reads_a_year() -> None:
+    from core.fingerprint.parsers import parse_period_to_days
+
+    assert parse_period_to_days("תקופה של 30 יום, ימים 90") == 30
+    assert parse_period_to_days("בשנה 2024 נכנס לתוקף") is None

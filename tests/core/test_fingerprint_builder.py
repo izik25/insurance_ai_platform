@@ -258,3 +258,18 @@ def test_entry_ages_kept_when_quote_states_entry_limit() -> None:
     texts = {"base.age_limitations": ("18 עד 65", "גיל הכניסה לביטוח הוא מגיל 18 ועד גיל 65")}
     result = _gated(_profile(age_restrictions=ages), statuses, texts)
     assert (result.min_entry_age, result.max_entry_age) == (18, 65)
+
+
+def test_survival_clause_quoted_as_waiting_period_is_dropped() -> None:
+    """Harel 541 (2026-11 cancer pilot): the waiting-period answer quoted the
+    survival clause, so waiting=14 duplicated the 14-day survival period."""
+    quote = "החברה תשלם את סכום הביטוח כאשר המבוטח חי תקופה העולה על יום 14 לאחר קרות מקרה הביטוח"
+    statuses = {"base.waiting_period_details": "FOUND", "base.survival_period_details": "FOUND"}
+    texts = {
+        "base.waiting_period_details": ("תקופת ההמתנה היא 14 ימים", quote),
+        "base.survival_period_details": ("תקופת ההישרדות היא 14 יום", quote),
+    }
+    profile = _profile(waiting_period_text="14 ימים מקרות מקרה הביטוח", survival_period_text="14 ימים")
+    result = _gated(profile, statuses, texts)
+    assert result.waiting_period_days is None
+    assert result.survival_period_days == 14

@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Literal
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, OpenAI, RateLimitError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 
 from core.utils.logging import get_logger
 
@@ -51,7 +51,7 @@ _MAX_RETRIES = 5
 # Short: verdict + a 2-sentence reasoning fits well under this (confirmed
 # live in the smoke test); keeping it small also shrinks the per-request
 # token footprint against the account's TPM cap below.
-_MAX_TOKENS = 300
+_MAX_TOKENS = 1200
 
 # The account's real limits for gpt-4.1-mini - concurrency alone isn't
 # enough to respect these; a request-count gate here would have looked fine
@@ -120,42 +120,111 @@ _SYSTEM_PROMPT = """\
 הם מתארים בפועל את אותו סוג כיסוי ביטוחי - למרות שהניסוח, המספור והשם עשויים \
 להיות שונים לגמרי בין החברות.
 
-קיבלת את השדות המובנים שחולצו מכל אחד משני המסמכים. השתמש בהבנת הנקרא של \
-המשמעות בפועל, לא בהשוואת מילים:
+קיבלת מכל אחד משני המסמכים את המידע שחולץ ממנו. כשמופיעות "תשובות לבנק \
+השאלות" - אלה תשובות לאותן שאלות בדיוק, שנשאלו על שני המסמכים מתוך הטקסט \
+המלא שלהם; השווה אותן שאלה מול שאלה. השתמש בהבנת הנקרא של המשמעות בפועל, \
+לא בהשוואת מילים:
 
 - מילה זהה יכולה להופיע במשמעויות שונות לגמרי אצל שתי חברות (למשל שם מותג \
 מסחרי מול ביטוי לשוני רגיל). אל תסתמך על כך ששתי מילים חופפות - בדוק אם \
 המשמעות התוכנית באמת זהה.
-- התמקד בשאלה: מהו האירוע הביטוחי המזכה בתשלום, ומהו מנגנון התשלום (סכום \
-חד-פעמי / קצבה חודשית / שחרור מפרמיה / הקדמת חלק מסכום ביטוח קיים וכו')? \
-שני נספחים עם אותו אירוע ביטוחי ואותו מנגנון תשלום, גם אם מנוסחים אחרת, \
-הם אותו כיסוי בפועל.
-- verdict="same_coverage" - אותו כיסוי בפועל.
-- verdict="different_coverage" - כיסוי שונה במהותו (אירוע ביטוחי שונה, או \
-מנגנון תשלום שונה).
-- verdict="uncertain" - אין מספיק מידע בשדות שסופקו כדי להחליט בביטחון; \
-נדרשת בדיקה אנושית.
+- "לא נמצא" במסמך אחד אינו אומר שהכיסוי חסר בו - ייתכן שפשוט לא נכתב. אל \
+תסיק הבדל מהותי רק מתשובה חסרה.
 
-החזר גם נימוק קצר (עד 2 משפטים) בעברית.
+ענה על שתי שאלות בלבד - ההכרעה הסופית מחושבת מהן:
+
+1. core_insured_event - האירוע הביטוחי העיקרי, זה שמזכה בתגמול העיקרי של \
+הנספח (למשל "גילוי מחלת סרטן לראשונה"). התעלם מכיסויים משניים ומהרחבות \
+(הישנות המחלה, סרטן מוקדם בתשלום חלקי, חוות דעת שניה, ליווי, שיפוי נוסף):
+   * "same" - אותו אירוע עיקרי באותו היקף (גם אם הניסוח שונה).
+   * "narrower_in_a" / "narrower_in_b" - האירוע העיקרי באותו נספח מוגבל רק \
+לחלק מהמקרים שהשני מכסה (למשל רק סרטן השד והרחם מול כל סוגי הסרטן, או רק \
+ילדים מול כלל המבוטחים). היעדר כיסוי משני בנספח אחד (הישנות המחלה, מקרה \
+שני, סרטן מוקדם, הרחבות) אינו הופך את האירוע העיקרי שלו לצר יותר - זה הבדל \
+שנרשם רק ב-material_differences.
+   * "different" - אירוע עיקרי אחר.
+   * "unclear" - אי אפשר לקבוע מהמידע.
+2. core_payment_mechanism - מנגנון התגמול העיקרי (סכום חד-פעמי / תשלומים \
+חודשיים / שיפוי הוצאות / שירות / שחרור מפרמיה):
+   * "same", "different" או "unclear". נספח שמשלם סכום חד-פעמי וגם נותן \
+הרחבות שיפוי או שירות - מנגנונו העיקרי הוא עדיין סכום חד-פעמי.
+
+הבדלים בתקופות (אכשרה/המתנה/הישרדות), בסכומים ובאחוזים, בגילאי כניסה וסיום, \
+בחריגים ובכיסויים המשניים וההרחבות אינם משפיעים על שתי השאלות - אבל חובה לפרט \
+כל אחד מהם ב-material_differences.
+
+החזר גם נימוק קצר (עד 2 משפטים) בעברית, ו-material_differences: רשימת \
+ההבדלים המהותיים בין שני המסמכים (נושא, מה כתוב ב-A, מה כתוב ב-B), בעברית. \
+רשימה ריקה אם אין הבדלים.
 """
 
 _JUDGE_JSON_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["verdict", "reasoning"],
+    "required": ["core_insured_event", "core_payment_mechanism", "reasoning", "material_differences"],
     "properties": {
-        "verdict": {
+        "core_insured_event": {
             "type": "string",
-            "enum": ["same_coverage", "different_coverage", "uncertain"],
+            "enum": ["same", "narrower_in_a", "narrower_in_b", "different", "unclear"],
         },
+        "core_payment_mechanism": {"type": "string", "enum": ["same", "different", "unclear"]},
         "reasoning": {"type": "string"},
+        "material_differences": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["topic", "document_a", "document_b"],
+                "properties": {
+                    "topic": {"type": "string"},
+                    "document_a": {"type": "string"},
+                    "document_b": {"type": "string"},
+                },
+            },
+        },
     },
 }
 
 
+class MaterialDifference(BaseModel):
+    topic: str
+    document_a: str
+    document_b: str
+
+
 class JudgeVerdict(BaseModel):
-    verdict: Literal["same_coverage", "different_coverage", "uncertain"]
+    """The verdict is computed in code from the two core axes, never taken
+    from the model directly: asked for an overall verdict, the model (given
+    full question-bank answers) called 33 of 40 cancer pilot pairs
+    "different" over coverage-end ages, qualifying periods and secondary
+    benefits - exactly the differences the prompt said not to decide on."""
+
+    core_insured_event: Literal["same", "narrower_in_a", "narrower_in_b", "different", "unclear"] = (
+        "unclear"
+    )
+    core_payment_mechanism: Literal["same", "different", "unclear"] = "unclear"
+    verdict: Literal["same_coverage", "different_coverage", "uncertain"] = "uncertain"
     reasoning: str
+    material_differences: list[MaterialDifference] = []
+
+    @model_validator(mode="after")
+    def _derive_verdict(self) -> JudgeVerdict:
+        event, payment = self.core_insured_event, self.core_payment_mechanism
+        if event in ("narrower_in_a", "narrower_in_b", "different") or payment == "different":
+            self.verdict = "different_coverage"
+        elif event == "same" and payment == "same":
+            self.verdict = "same_coverage"
+        else:
+            self.verdict = "uncertain"
+        return self
+
+
+class JudgeAnswer(BaseModel):
+    """One question-bank answer (core/questions) as the judge sees it."""
+
+    question: str
+    status: str
+    answer: str | None = None
 
 
 class DocumentJudgeInfo(BaseModel):
@@ -174,9 +243,45 @@ class DocumentJudgeInfo(BaseModel):
     exclusions: list[str] = []
     restrictions: list[str] = []
     disease_list: list[str] = []
+    # v2 (question-bank based) input - when `answers` is non-empty the judge
+    # compares these instead of the old extraction fields above, which the
+    # 2026-10 review found unreliable (period mix-ups, premium-table ages).
+    category_id: str | None = None
+    fingerprint: dict[str, str] = {}
+    answers: list[JudgeAnswer] = []
+
+
+_ANSWER_STATUS_HE = {
+    "FOUND": "נמצא",
+    "NOT_FOUND": "לא נמצא במסמך",
+    "NOT_APPLICABLE": "לא רלוונטי",
+    "AMBIGUOUS": "לא חד-משמעי",
+}
+# Keeps a 28-question pair comfortably inside a few thousand tokens.
+_MAX_ANSWER_CHARS = 400
+
+
+def _format_side_v2(label: str, info: DocumentJudgeInfo) -> str:
+    lines = [f"=== {label} (חברת {info.company_id}) ==="]
+    if info.appendix_name:
+        lines.append(f"שם הנספח: {info.appendix_name}")
+    if info.category_id:
+        lines.append(f"קטגוריה: {info.category_id}")
+    if info.fingerprint:
+        lines.append("טביעת אצבע: " + "; ".join(f"{k}={v}" for k, v in info.fingerprint.items()))
+    lines.append("תשובות לבנק השאלות:")
+    for item in info.answers:
+        status = _ANSWER_STATUS_HE.get(item.status, item.status)
+        answer = " ".join((item.answer or "").split())
+        if len(answer) > _MAX_ANSWER_CHARS:
+            answer = answer[:_MAX_ANSWER_CHARS] + "…"
+        lines.append(f"- {item.question} [{status}]" + (f": {answer}" if answer else ""))
+    return "\n".join(lines)
 
 
 def _format_side(label: str, info: DocumentJudgeInfo) -> str:
+    if info.answers:
+        return _format_side_v2(label, info)
     lines = [f"=== {label} (חברת {info.company_id}) ==="]
     fields = [
         ("שם הנספח", info.appendix_name),
@@ -219,6 +324,8 @@ def submit_judge_batch(
         body = {
             "model": model,
             "max_tokens": _MAX_TOKENS,
+            "temperature": 0,
+            "seed": 0,
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": build_pair_prompt(doc_a, doc_b)},
@@ -346,6 +453,10 @@ async def judge_pair(
             response = await client.chat.completions.create(
                 model=model,
                 max_tokens=_MAX_TOKENS,
+                # Same pair, same answer: a re-run of the cancer pilot's 17
+                # dropped pairs flipped 3 verdicts at the default temperature.
+                temperature=0,
+                seed=0,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": build_pair_prompt(doc_a, doc_b)},

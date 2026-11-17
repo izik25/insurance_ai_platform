@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     # again later is just a config change plus swapping core/extraction/
     # llm_extract.py's client.
     extraction_model: str = "gpt-4.1-mini"
+    # The matching judge (scripts/match_documents_v2.py Stage B) decides
+    # same/different coverage from both documents' question-bank answers.
+    # gpt-4.1, not mini: on the 2026-11 cancer pilot's 40 pairs mini
+    # disagreed with gpt-4.1 on 15 and with its own previous run on 3 (at
+    # temperature 0), splitting 8 equivalent lump-sum cancer appendices
+    # inconsistently; gpt-4.1 grouped all 8 and singled out only the
+    # breast/uterine-only appendix.
+    judge_model: str = "gpt-4.1"
     embedding_model_name: str = "intfloat/multilingual-e5-large"
     # 0.90, not the more obvious 0.95: with lexical corroboration mandatory
     # for every auto-confirm regardless of this threshold (see

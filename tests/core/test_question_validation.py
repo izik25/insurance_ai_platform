@@ -69,3 +69,39 @@ def test_non_found_answers_are_left_alone() -> None:
     batch = _batch(QuestionAnswerItem(question_id="base.cap_exists", status="NOT_FOUND"))
     assert validate_answers(batch, _DOCUMENT) == {}
     assert batch.answers[0].status == "NOT_FOUND"
+
+
+def test_waiting_period_quoting_a_survival_clause_is_downgraded() -> None:
+    document = "החברה תשלם את סכום הביטוח כאשר המבוטח חי תקופה העולה על יום 14 לאחר קרות מקרה הביטוח."
+    batch = _batch(
+        QuestionAnswerItem(
+            question_id="base.waiting_period_details",
+            status="FOUND",
+            answer_text="תקופת ההמתנה היא 14 ימים מקרות מקרה הביטוח",
+            evidence_text="כאשר המבוטח חי תקופה העולה על יום 14 לאחר קרות מקרה הביטוח",
+        ),
+        QuestionAnswerItem(
+            question_id="base.survival_period_details",
+            status="FOUND",
+            answer_text="תקופת ההישרדות היא 14 יום",
+            evidence_text="כאשר המבוטח חי תקופה העולה על יום 14 לאחר קרות מקרה הביטוח",
+        ),
+    )
+    reasons = validate_answers(batch, document)
+    assert batch.answers[0].status == "AMBIGUOUS"
+    assert "survival" in reasons["base.waiting_period_details"]
+    assert batch.answers[1].status == "FOUND"
+
+
+def test_real_waiting_period_mentioning_survival_word_is_kept() -> None:
+    document = "תקופת המתנה של 90 יום מקרות מקרה הביטוח, ובלבד שהמבוטח בחיים בתומה."
+    batch = _batch(
+        QuestionAnswerItem(
+            question_id="base.waiting_period_details",
+            status="FOUND",
+            answer_text="90 יום",
+            evidence_text="תקופת המתנה של 90 יום מקרות מקרה הביטוח, ובלבד שהמבוטח בחיים בתומה",
+        )
+    )
+    validate_answers(batch, document)
+    assert batch.answers[0].status == "FOUND"

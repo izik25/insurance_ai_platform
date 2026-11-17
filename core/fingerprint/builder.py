@@ -22,6 +22,7 @@ from core.fingerprint.parsers import (
     parse_percentage,
     parse_period_to_days,
 )
+from core.questions.validation import STAYS_ALIVE
 
 # Bumped whenever build_fingerprint's logic (or the parsers it calls)
 # changes in a way that should invalidate document_pipeline_status.
@@ -258,6 +259,17 @@ def _unsupported_period_reason(
     support = " ".join(support_parts)
     if slot == "survival" and _DEATH_BENEFIT.search(support) and not _STAYS_ALIVE.search(support):
         return "a payment-on-death clause, not a survival period"
+    # Harel 541: the "waiting period" details answer quoted the survival
+    # clause ("שהמבוטח חי תקופה העולה על יום 14") - the day count is in the
+    # quote, so the number check below would pass it.
+    details_quote = (answer_texts.get(details_q) or (None, None))[1] or ""
+    own_marker = _WAITING_MARKERS if slot == "waiting" else _QUALIFYING_MARKERS
+    if (
+        slot in ("waiting", "qualifying")
+        and STAYS_ALIVE.search(details_quote)
+        and not own_marker.search(details_quote)
+    ):
+        return "the question-bank quote describes staying alive (a survival period)"
     # The number must appear in the document quote itself, not just in the
     # model's wording of the answer: Harel 824's answer said "90 יום" while
     # its quote read "בת 00 יום" (the 90 existed elsewhere in the document,

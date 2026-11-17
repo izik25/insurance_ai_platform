@@ -29,6 +29,20 @@ _MIN_CHECKED_NUMBER = 3
 _MIN_EVIDENCE_OVERLAP = 0.5
 _MIN_EVIDENCE_WORDS = 4
 
+# A quote saying the insured must stay alive for N days after the insured
+# event is a survival period, whatever the answer calls it (confirmed live:
+# Harel 541's "waiting period" answer quoted "שהמבוטח חי תקופה העולה על
+# יום 14 לאחר קרות מקרה הביטוח" - the same clause as its survival answer).
+STAYS_ALIVE = re.compile(
+    r"לא נפטר|לא נפטרה|בחיים|חי בתום|חיה בתום|יישאר|תישאר"
+    r"|(?:המבוטח|המבוטחת)\s+(?:חי|חיה|יהיה|תהיה)\s"
+    r"|(?:חי|חיה)\s+(?:תקופה|במשך|לפחות)"
+)
+_PERIOD_DETAIL_QUESTIONS = {
+    "base.waiting_period_details": re.compile(r"המתנה|המתנת"),
+    "base.qualifying_period_details": re.compile(r"אכשרה"),
+}
+
 
 def _strip_prefix(word: str) -> str:
     return word[1:] if len(word) > 3 and word[0] in _HEBREW_PREFIXES else word
@@ -61,7 +75,17 @@ def validate_answers(batch: QuestionAnswerBatch, document_text: str) -> dict[str
             answer.status = "AMBIGUOUS"
             continue
 
-        evidence_words = _words(answer.evidence_text or "")
+        own_marker = _PERIOD_DETAIL_QUESTIONS.get(answer.question_id)
+        evidence = answer.evidence_text or ""
+        if own_marker and STAYS_ALIVE.search(evidence) and not own_marker.search(evidence):
+            reasons[answer.question_id] = (
+                "downgraded FOUND->AMBIGUOUS: the quoted clause requires the insured to stay "
+                "alive - a survival period, not this period"
+            )
+            answer.status = "AMBIGUOUS"
+            continue
+
+        evidence_words = _words(evidence)
         if len(evidence_words) >= _MIN_EVIDENCE_WORDS:
             overlap = len(evidence_words & doc_words) / len(evidence_words)
             if overlap < _MIN_EVIDENCE_OVERLAP:

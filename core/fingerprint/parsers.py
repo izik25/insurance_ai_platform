@@ -62,6 +62,12 @@ _WORD_PERIOD_PATTERN = re.compile(
 # Dual forms are a number+unit in one word ("חודשיים" = two months).
 _DUAL_PERIOD_PATTERN = re.compile(r"(?<![א-ת])(שנתיים|חודשיים|שבועיים|יומיים)(?![א-ת])")
 DUAL_TO_DAYS = {"שנתיים": 730, "חודשיים": 60, "שבועיים": 14, "יומיים": 2}
+# "<unit> [one word] <number>" - unit (optionally with ה-), at most one word,
+# then the number; the number must not itself start a new number+unit.
+_REVERSED_PERIOD_PATTERN = re.compile(
+    r"(?<![א-ת])ה?(שנים|שנה|שבועות|שבוע|חודשים|חודש|ימים|יום)(?:\s+[א-ת]+)?\s+(\d+)"
+    r"(?!\d)(?!\s*(?:שנים|שנה|שבועות|שבוע|חודשים|חודש|ימים|יום|שעות|שעה|%|₪))"
+)
 
 
 def parse_period_to_days(text: str | None) -> int | None:
@@ -111,6 +117,12 @@ def parse_period_to_days(text: str | None) -> int | None:
         candidates.append((match.start(), DUAL_TO_DAYS[match.group(1)]))
 
     if not candidates:
+        # RTL reading order can put the number after its unit (Phoenix 5630:
+        # "הימים הראשונים 90 תקופת האכשרה..." for "90 הימים הראשונים").
+        # Only a fallback - the normal order always wins when present.
+        match = _REVERSED_PERIOD_PATTERN.search(text)
+        if match and 0 < int(match.group(2)) < 1000:
+            return int(match.group(2)) * PERIOD_UNIT_TO_DAYS[match.group(1)]
         return None
     return min(candidates, key=lambda c: c[0])[1]
 

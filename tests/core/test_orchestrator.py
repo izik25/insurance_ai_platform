@@ -40,7 +40,9 @@ def test_identical_documents_auto_confirm() -> None:
         ]
     )
 
-    results = run_stage_a_for_document(source.document_id, features_by_id, index)
+    results = run_stage_a_for_document(
+        source.document_id, features_by_id, index, auto_confirm_on_score=True
+    )
 
     assert "phoenix" in results
     outcome = results["phoenix"]
@@ -48,6 +50,26 @@ def test_identical_documents_auto_confirm() -> None:
     assert outcome.status == "auto_confirmed"
     assert outcome.match_stage == FAST_ONLY
     assert outcome.final_score >= 0.9
+
+
+def test_by_default_even_identical_documents_go_to_the_judge() -> None:
+    """Default policy: the score never auto-confirms; the LLM judge (which
+    compares the two documents' question-bank answers) decides."""
+    source = _features(document_id="migdal:a", company_id="migdal")
+    candidate = _features(document_id="phoenix:a", company_id="phoenix")
+    features_by_id = {source.document_id: source, candidate.document_id: candidate}
+    index = CandidateIndex(
+        [
+            CandidateIndexEntry(source.document_id, source.company_id, source.category_id, True),
+            CandidateIndexEntry(candidate.document_id, candidate.company_id, candidate.category_id, True),
+        ]
+    )
+
+    outcome = run_stage_a_for_document(source.document_id, features_by_id, index)["phoenix"]
+
+    assert outcome.final_score >= 0.9
+    assert outcome.status == "pending_review"
+    assert outcome.match_stage == NEEDS_DEEP_VERIFICATION
 
 
 def test_moderately_similar_documents_need_deep_verification() -> None:
@@ -109,7 +131,9 @@ def test_high_score_but_low_evidence_does_not_auto_confirm() -> None:
         ]
     )
 
-    results = run_stage_a_for_document(source.document_id, features_by_id, index)
+    results = run_stage_a_for_document(
+        source.document_id, features_by_id, index, auto_confirm_on_score=True
+    )
 
     outcome = results["phoenix"]
     assert outcome.final_score == 1.0
