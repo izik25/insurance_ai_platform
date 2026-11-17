@@ -19,8 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from sqlalchemy import select  # noqa: E402
+
 from companies.aig import register  # noqa: E402
 from companies.aig.downloader import AigDocumentRef, AigDownloader  # noqa: E402
+from companies.aig.identifiers import unique_internal_id  # noqa: E402
 from core.config.settings import get_settings  # noqa: E402
 from core.database.models import Company, Document  # noqa: E402
 from core.database.session import init_db, session_scope  # noqa: E402
@@ -115,6 +118,17 @@ def main() -> None:
     if args.limit is not None:
         files = files[: args.limit]
 
+    # Every internal identifier already in use, so a new document never
+    # reuses one (see companies/aig/identifiers.py).
+    with session_scope() as session:
+        taken_ids: set[str] = {
+            number
+            for numbers in session.scalars(
+                select(Document.appendix_number).where(Document.company_id == plugin.config.company_id)
+            )
+            for number in (numbers or [])
+        }
+
     saved = 0
     skipped = 0
     for file_path in files:
@@ -134,10 +148,15 @@ def main() -> None:
             # A re-sync's fresh (usually empty) ref value must not clobber
             # that already-backfilled value - same "trust the source, don't
             # overwrite" principle already applied for Direct Insurance.
+            # AIG publishes no appendix numbers, so a document without one
+            # gets a stable internal "AIG-..." identifier from its title -
+            # kept across re-syncs once assigned (2026-11-18).
             existing = session.get(Document, document_id)
             appendix_number = ref.appendix_numbers
             if not appendix_number and existing is not None and existing.appendix_number:
                 appendix_number = existing.appendix_number
+            if not appendix_number:
+                appendix_number = [unique_internal_id(ref.title or file_path.stem, taken_ids)]
 
             document = Document(
                 id=document_id,
