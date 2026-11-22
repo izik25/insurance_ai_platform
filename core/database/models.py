@@ -488,3 +488,19 @@ class MatchCalibrationRun(Base):
     created_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ReviewVerdict(Base):
+    """One reviewer mark from the client review page (frontend/public/review.html):
+    correct/partial/wrong plus an optional note, for one source appendix
+    against one company's proposed counterpart. `key` is the page's own
+    stable id for that comparison card; `data` is the page's JSON as-is
+    (verdict, note, src/cand document ids, company, reviewer name)."""
+
+    __tablename__ = "review_verdicts"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     database_url: str | None = None
 
+    # Shared secret for the client review page (frontend/public/review.html)
+    # and its /api/review endpoints. The review link carries it as ?k=...;
+    # unset means the review endpoints refuse every request.
+    review_access_code: str | None = None
+
     tessdata_dir: Path = Path("./tessdata")
     ocr_language: str = "heb"
     # A malformed/huge scanned page can hang the tesseract subprocess

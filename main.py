@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.public_routes import router as public_api_router
+from api.review_routes import router as review_api_router
 from api.routes import router as api_router
 from core.config.settings import get_settings
 from core.database.session import init_db
@@ -40,7 +41,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[f"http://localhost:{port}" for port in range(5173, 5178)],
-    allow_methods=["GET", "PATCH"],
+    allow_methods=["GET", "PATCH", "PUT"],
     allow_headers=["*"],
     # Content-Disposition isn't in the CORS-safelisted response headers, so
     # without this the browser silently hides it from fetch() even though the
@@ -51,6 +52,7 @@ app.add_middleware(
 
 app.include_router(api_router)
 app.include_router(public_api_router)
+app.include_router(review_api_router)
 
 
 @app.get("/health")
