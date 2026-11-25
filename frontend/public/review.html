@@ -86,6 +86,20 @@ details > summary { cursor: pointer; color: var(--accent); font-weight: 600; fon
 .save-state { font-size: .82rem; color: var(--muted); }
 textarea { font: inherit; font-size: .92rem; width: 100%; box-sizing: border-box; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--bg); color: var(--ink); resize: vertical; }
 .notice { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 12px; font-size: .9rem; }
+/* merged summary tables */
+.sum td { min-width: 210px; }
+.sum th[scope=row] { color: var(--ink); font-size: .88rem; min-width: 110px; }
+.sum th[scope=row], .sum tr:first-child th:first-child { position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 1; }
+.sum tr:first-child th { vertical-align: bottom; }
+.sum tr.grp td { background: var(--sunk); color: var(--muted); font-weight: 700; font-size: .8rem; letter-spacing: .03em; padding-block: 5px; }
+.sum .sv { font-weight: 700; }
+.sum .hname { font-weight: 400; font-size: .82rem; }
+.sum .codes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.sum .chip.only { background: var(--warn-soft); color: var(--warn); }
+.sum .pg { display: inline-block; margin-top: 4px; font-size: .78rem; border: 1px solid var(--line); background: var(--surface); color: var(--accent); border-radius: 6px; padding: 0 8px; cursor: pointer; text-decoration: none; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.clamp.open { display: block; }
+.chip.st-ok { background: var(--ok-soft); color: var(--ok); } .chip.st-warn { background: var(--warn-soft); color: var(--warn); } .chip.st-bad { background: var(--bad-soft); color: var(--bad); }
 /* pdf viewer */
 .viewers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .viewers.single { grid-template-columns: 1fr; max-width: 760px; }
@@ -158,7 +172,6 @@ const aigLast = (a, b) => (a === "aig") - (b === "aig");
 const COS = Object.fromEntries(Object.entries(DATA.companies).sort(([a], [b]) => aigLast(a, b)));
 const ORDER = [...docs].sort((a, b) => aigLast(a.coId, b.coId) || a.i - b.i);
 ORDER.forEach((d, k) => { d.no = k + 1; });
-const FPL = { waiting_period_days: "תקופת המתנה (ימים)", qualifying_period_days: "תקופת אכשרה (ימים)", survival_period_days: "תקופת הישרדות (ימים)", min_entry_age: "גיל כניסה מינימלי", max_entry_age: "גיל כניסה מקסימלי", termination_age: "גיל סיום כיסוי", benefit_type: "סוג תגמול", benefit_amount_max: "סכום ביטוח", maximum_benefit: "תקרת תגמול", deductible_amount: "השתתפות עצמית", target_population: "אוכלוסיית יעד" };
 const VAL = { LUMP_SUM: "סכום חד-פעמי", MONTHLY_ANNUITY: "תשלום חודשי", REIMBURSEMENT: "שיפוי הוצאות", SERVICE: "שירות", INDIVIDUAL: "פרטי", GROUP: "קבוצתי", CHILDREN: "ילדים" };
 const QS = { FOUND: "נמצא", NOT_FOUND: "לא נמצא", NOT_APPLICABLE: "לא רלוונטי", AMBIGUOUS: "לא חד-משמעי" };
 const EV = { same: "אירוע עיקרי זהה", narrower_in_a: "האירוע אצל הנספח שבחרת צר יותר", narrower_in_b: "האירוע אצל המועמד צר יותר", different: "אירוע עיקרי שונה", unclear: "אירוע עיקרי לא ברור" };
@@ -225,21 +238,92 @@ function viewerToggle(docsToShow, label) {
   return { btn, wrap, open };
 }
 
-/* ---------- detail panels: answers and full fingerprint ---------- */
-const FPF = {
-  main_category: "קטגוריה ראשית", coverage_family: "משפחת כיסוי", coverage_subtype: "תת-סוג כיסוי",
-  benefit_model: "מודל תגמול", target_population: "אוכלוסיית יעד",
-  waiting_period_days: "תקופת המתנה (ימים)", waiting_period_raw: "תקופת המתנה: הטקסט",
-  qualifying_period_days: "תקופת אכשרה (ימים)", qualifying_period_raw: "תקופת אכשרה: הטקסט",
-  survival_period_days: "תקופת הישרדות (ימים)", survival_period_raw: "תקופת הישרדות: הטקסט",
-  min_entry_age: "גיל כניסה מינימלי", max_entry_age: "גיל כניסה מקסימלי", termination_age: "גיל סיום כיסוי", age_raw: "גילאים: הטקסט",
-  benefit_type: "סוג תגמול", benefit_amount_min: "סכום מינימלי", benefit_amount_max: "סכום מקסימלי", benefit_amount_currency: "מטבע",
-  maximum_benefit: "תקרת תגמול", benefit_percentage: "אחוז תגמול", deductible_amount: "השתתפות עצמית", amount_raw: "סכומים: הטקסט",
-  covered_event_count: "מספר אירועים מכוסים", major_exclusion_count: "מספר חריגים עיקריים", special_condition_count: "מספר תנאים מיוחדים",
-};
-const CODECAT = { insured_event: "מקרה הביטוח", covered_event: "אירועים מכוסים", exclusion: "חריגים", eligibility: "זכאות", definition: "הגדרות", benefit_type: "סוג תגמול" };
-const fmtFull = v => Array.isArray(v) ? (v.length ? v.join(" · ") : "—") : fmt(v);
-const colHead = d => `#${d.no} ${d.co}`;
+/* ---------- one merged summary per appendix / per match: answers + fingerprint values + canonical codes, by topic ---------- */
+const DAYS = n => n == null ? null : `${fmt(n)} ימים`;
+const CUR = { ILS: "₪", USD: "$" };
+const money = (f, v) => v == null ? null : `${fmt(v)} ${CUR[f.benefit_amount_currency] || f.benefit_amount_currency || "₪"}`;
+const joinV = (...xs) => xs.filter(x => x != null && x !== "").join(" · ") || null;
+const TOPICS = [
+  { g: "מה הנספח מכסה" },
+  { l: "סוג הכיסוי", v: d => d.catHe },
+  { l: "אוכלוסיית יעד", v: d => d.fpFull.target_population ? fmt(d.fpFull.target_population) : null },
+  { l: "מקרה הביטוח", q: ["base.insured_event"], c: ["insured_event"] },
+  { l: "מה מכוסה", q: ["base.covered_scope", "base.covered_events"], c: ["covered_event"] },
+  { l: "הרחבות", q: ["base.extensions_exist"], c: ["extension"] },
+  { l: "הגדרות מיוחדות", q: ["base.special_definitions"], c: ["definition"] },
+  { g: "חריגים ומגבלות" },
+  { l: "חריגים", q: ["base.exclusions"], c: ["exclusion"] },
+  { l: "חריגים לחריגים", q: ["base.exceptions_to_exceptions"] },
+  { l: "סייגים", q: ["base.limitations"], c: ["limitation"] },
+  { g: "תקופות וגילאים" },
+  { l: "תקופת אכשרה", v: d => DAYS(d.fpFull.qualifying_period_days), q: ["base.qualifying_period_details", "base.qualifying_period_exists"], raw: "qualifying_period_raw" },
+  { l: "תקופת המתנה", v: d => DAYS(d.fpFull.waiting_period_days), q: ["base.waiting_period_details", "base.waiting_period_exists"], raw: "waiting_period_raw" },
+  { l: "תקופת הישרדות", v: d => DAYS(d.fpFull.survival_period_days), q: ["base.survival_period_details", "base.survival_period_exists"], raw: "survival_period_raw" },
+  { l: "גילאים", v: d => { const f = d.fpFull; return joinV(f.min_entry_age != null || f.max_entry_age != null ? `כניסה ${f.min_entry_age ?? "?"}–${f.max_entry_age ?? "?"}` : null, f.termination_age != null ? `סיום בגיל ${f.termination_age}` : null); }, q: ["base.age_limitations"], raw: "age_raw" },
+  { g: "תגמול" },
+  { l: "סוג תגמול", v: d => { const x = d.fpFull.benefit_type || d.fpFull.benefit_model; return x ? fmt(x) : null; }, q: ["base.benefit_type"] },
+  { l: "חישוב התגמול", q: ["base.benefit_calculation"] },
+  { l: "סכום ביטוח", v: d => { const f = d.fpFull, lo = f.benefit_amount_min, hi = f.benefit_amount_max; return lo != null && hi != null && lo !== hi ? `${fmt(lo)}–${money(f, hi)}` : money(f, hi ?? lo); }, q: ["base.insurance_amount_details", "base.insurance_amount_exists"], raw: "amount_raw" },
+  { l: "תקרת תגמול", v: d => joinV(money(d.fpFull, d.fpFull.maximum_benefit), d.fpFull.benefit_percentage != null ? `${fmt(d.fpFull.benefit_percentage)}%` : null), q: ["base.cap_exists"] },
+  { l: "השתתפות עצמית", v: d => money(d.fpFull, d.fpFull.deductible_amount), q: ["base.deductible_exists"] },
+  { g: "זכאות, תביעה וסיום" },
+  { l: "תנאי זכאות", q: ["base.eligibility_conditions"] },
+  { l: "תנאי תביעה", q: ["base.claim_requirements"], c: ["claim_requirement"] },
+  { l: "סיום הכיסוי", q: ["base.termination_conditions"] },
+  { l: "תנאים מהותיים נוספים", q: ["base.material_terms_not_in_schema"] },
+];
+const EMPTY = { NOT_APPLICABLE: "לא רלוונטי", AMBIGUOUS: "לא נענה" };
+
+function topicCell(d, tp, side, opts) {
+  if (!d) return { td: el("td", { class: "muted", text: "—" }), empty: true, chips: {} };
+  const v = tp.v ? tp.v(d) : null;
+  const asked = (tp.q || []).map(q => d.qa[q]).filter(Boolean);
+  const a = asked.find(x => x[0] === "FOUND" && x[1]) || asked.find(x => x[0] === "AMBIGUOUS" && x[1]);
+  const text = a ? a[1] : (tp.raw && d.fpFull[tp.raw]) || null;
+  const codes = tp.c ? [...new Set(d.codes.filter(c => tp.c.includes(c[0])).map(c => c[1]))] : [];
+  const td = el("td"), chips = {};
+  if (v) td.append(el("div", { class: "sv", text: v }));
+  if (text) td.append(el("div", { class: "clamp", title: "לחיצה מרחיבה / מקצרת", text }));
+  if (codes.length) td.append(el("div", { class: "codes" }, ...codes.map(c => (chips[c] = el("span", { class: "chip", text: c })))));
+  if (a && a[3]) {
+    const tip = a[2] ? `ציטוט: "${a[2]}"` : "";
+    if (opts.viewer) { const b = el("button", { type: "button", class: "pg", title: tip, text: `עמוד ${a[3]}` }); b.addEventListener("click", () => opts.viewer.open(a[3], side)); td.append(b); }
+    else td.append(el("a", { class: "pg", href: `${d.pdf}#page=${a[3]}`, target: "_blank", rel: "noopener", title: tip, text: `עמוד ${a[3]}` }));
+  }
+  const empty = !td.childElementCount;
+  if (empty) { const st = asked.map(x => x[0]); td.append(el("span", { class: "muted", text: tp.q ? (st.length && st.every(s => s === "NOT_APPLICABLE") ? EMPTY.NOT_APPLICABLE : st.includes("FOUND") || !st.includes("AMBIGUOUS") ? "לא נמצא בנספח" : EMPTY.AMBIGUOUS) : "—" })); }
+  return { td, v, empty, chips };
+}
+
+/* ds: the appendices as columns (null = no match in that company); heads: header content per column.
+   opts.viewer: in-page PDF viewer for page buttons (else page links open a new tab); opts.pre: extra rows on top [{l, cell(i)}]. */
+function summaryTable(ds, heads, opts = {}) {
+  const t = el("table", { class: "grid sum" }, el("tr", {}, el("th", { text: "נושא" }), ...heads.map(h => el("th", {}, ...[].concat(h)))));
+  const span = String(ds.length + 1);
+  const group = g => t.append(el("tr", { class: "grp" }, el("td", { colspan: span, text: g })));
+  if (opts.pre && opts.pre.length) {
+    group("ההתאמה");
+    opts.pre.forEach(p => t.append(el("tr", {}, el("th", { scope: "row", text: p.l }), ...ds.map((d, i) => { const c = p.cell(i); return el("td", {}, ...[].concat(c == null || c === "" ? el("span", { class: "muted", text: "—" }) : c)); }))));
+  }
+  const extra = [...new Set(ds.filter(Boolean).flatMap(d => Object.keys(d.qa)).filter(q => !q.startsWith("base.")))].map(q => ({ l: QT[q] || q, q: [q] }));
+  const topics = [...TOPICS, ...(extra.length ? [{ g: "שאלות ייעודיות לסוג הכיסוי" }, ...extra] : [])];
+  let pending = null;
+  topics.forEach(tp => {
+    if (tp.g) { pending = tp.g; return; }
+    const cells = ds.map((d, i) => topicCell(d, tp, i, opts));
+    if (cells.every(c => c.empty)) return;
+    if (pending) { group(pending); pending = null; }
+    const live = cells.filter((c, i) => ds[i]);
+    if (live.length > 1 && tp.v) {
+      const base = cells[0].v ?? "";
+      cells.forEach((c, i) => { if (i && ds[i] && (c.v ?? "") !== base) { c.td.classList.add("diff"); cells[0].td.classList.add("diff"); } });
+    }
+    if (live.length > 1 && tp.c) live.forEach(c => Object.entries(c.chips).forEach(([code, chip]) => { if (live.some(o => o !== c && !o.chips[code])) chip.classList.add("only"); }));
+    t.append(el("tr", {}, el("th", { scope: "row", text: tp.l }), ...cells.map(c => c.td)));
+  });
+  return el("div", { class: "scroll" }, t);
+}
+document.addEventListener("click", e => { const c = e.target.closest && e.target.closest(".clamp"); if (c && !getSelection().toString()) c.classList.toggle("open"); });
 
 function togglePanel(label, build) {
   const btn = el("button", { type: "button", class: "btn", "aria-expanded": "false", text: label });
@@ -251,53 +335,8 @@ function togglePanel(label, build) {
   });
   return { btn, panel };
 }
-
-function qaPanel(ds, viewer) {
-  const qids = [...new Set(ds.flatMap(d => Object.keys(d.qa)))]
-    .sort((x, y) => (x.startsWith("base.") === y.startsWith("base.")) ? x.localeCompare(y) : (x.startsWith("base.") ? -1 : 1));
-  const t = el("table", { class: "grid qa" }, el("tr", {}, el("th", { text: "שאלה" }), ...ds.map(d => el("th", { text: colHead(d) }))));
-  qids.forEach(q => {
-    const tr = el("tr", {}, el("td", { text: QT[q] || q }));
-    ds.forEach((d, side) => {
-      const a = d.qa[q];
-      if (!a) { tr.append(el("td", { class: "muted", text: "השאלה לא נשאלה" })); return; }
-      const [st, ans, ev, pg] = a;
-      const td = el("td", {}, el("span", { class: `s-${st}`, text: QS[st] || st }));
-      if (ans) td.append(el("div", { text: ans }));
-      if (ev) td.append(el("div", { class: "muted", style: "font-size:.85rem", text: `ציטוט: "${ev}"` }));
-      if (pg && viewer) { const b = el("button", { type: "button", class: "btn", style: "padding:1px 8px;font-size:.8rem", text: `עמוד ${pg} בנספח` }); b.addEventListener("click", () => viewer.open(pg, side)); td.append(b); }
-      tr.append(td);
-    });
-    t.append(tr);
-  });
-  const counts = ds.map(d => { const c = {}; Object.values(d.qa).forEach(a => c[a[0]] = (c[a[0]] || 0) + 1); return `${colHead(d)}: ${c.FOUND || 0} נמצאו, ${c.NOT_FOUND || 0} לא נמצאו, ${c.AMBIGUOUS || 0} לא חד-משמעיות`; });
-  return [el("p", { class: "muted", text: counts.join(" · ") }), el("div", { class: "scroll" }, t)];
-}
-
-function fpPanel(ds) {
-  const t = el("table", { class: "grid" }, el("tr", {}, el("th", { text: "שדה" }), ...ds.map(d => el("th", { text: colHead(d) }))));
-  Object.keys(FPF).forEach(k => {
-    const vals = ds.map(d => d.fpFull[k]);
-    if (vals.every(v => v == null || (Array.isArray(v) && !v.length))) return;
-    const differ = ds.length > 1 && new Set(vals.map(v => JSON.stringify(v ?? null))).size > 1;
-    t.append(el("tr", {}, el("td", { text: FPF[k] }), ...vals.map(v => el("td", { class: differ ? "diff" : "", text: fmtFull(v) }))));
-  });
-  const out = [el("div", { class: "scroll" }, t)];
-  const cats = [...new Set(ds.flatMap(d => d.codes.map(c => c[0])))];
-  if (cats.length) {
-    const ct = el("table", { class: "grid" }, el("tr", {}, el("th", { text: "קודים קנוניים" }), ...ds.map(d => el("th", { text: colHead(d) }))));
-    cats.forEach(cat => {
-      const sets = ds.map(d => d.codes.filter(c => c[0] === cat).map(c => c[1]));
-      const common = sets.length > 1 ? sets.reduce((a, b) => a.filter(x => b.includes(x))) : [];
-      ct.append(el("tr", {}, el("td", { text: CODECAT[cat] || cat }), ...sets.map(s => el("td", {}, ...(s.length ? s.map(c => el("span", { class: "chip", style: `margin:1px;${common.includes(c) ? "" : "background:var(--warn-soft);color:var(--warn)"}`, text: c })) : [el("span", { class: "muted", text: "—" })])))));
-    });
-    out.push(el("span", { class: "label", text: ds.length > 1 ? "קודים קנוניים (קודים שמופיעים רק בצד אחד מסומנים בצבע)" : "קודים קנוניים" }), el("div", { class: "scroll" }, ct));
-  }
-  ds.forEach(d => {
-    if (d.adj.length) out.push(el("details", {}, el("summary", { text: `${colHead(d)}: תיקונים אוטומטיים בטביעת האצבע (${d.adj.length})` }), el("ul", {}, ...d.adj.map(a => el("li", { style: "direction:ltr;text-align:left;font-size:.85rem", text: a })))));
-  });
-  return out;
-}
+const colHead = d => `#${d.no} ${d.co}`;
+const SUMNOTE = "כל נושא מרכז במקום אחד את התשובה מהנספח, הערך שחולץ ממנו והקודים הקנוניים. ערכים שונים מסומנים בצבע, וקודים שמופיעים רק בחלק מהנספחים מודגשים. לחיצה על טקסט מרחיבה אותו.";
 
 /* ---------- list view ---------- */
 let coFilter = new Set(), catFilter = "", query = "";
@@ -381,22 +420,41 @@ function showCompare(doc, companies) {
     el("h2", { text: title(doc) }),
     el("p", {}, doc.name, " ", el("span", { class: "chip", text: doc.catHe })));
   const vt = viewerToggle([doc], "הצג את הנספח");
-  const qaT = togglePanel("שאלות ותשובות", () => qaPanel([doc], vt));
-  const fpT = togglePanel("טביעת אצבע", () => fpPanel([doc]));
-  sel.append(el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, qaT.btn, fpT.btn, vt.btn), qaT.panel, fpT.panel, vt.wrap);
+  const sumT = togglePanel("סיכום הנספח", () => [el("p", { class: "muted", style: "font-size:.88rem", text: SUMNOTE }), summaryTable([doc], [colHead(doc)], { viewer: vt })]);
+  sel.append(el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, sumT.btn, vt.btn), sumT.panel, vt.wrap);
   box.append(sel);
-  const counts = { found: 0 };
-  companies.forEach(coId => {
-    const res = findOutcome(doc, coId);
-    box.append(resultCard(doc, coId, res));
-    if (res && res.o.st === "auto_confirmed") counts.found++;
-  });
-  sel.append(el("p", { class: "muted", text: `נמצא נספח מקביל ב-${counts.found} מתוך ${companies.length} החברות שבחרת.` }));
+  const results = companies.map(coId => ({ coId, res: findOutcome(doc, coId) }));
+  results.forEach(({ coId, res }) => box.append(resultCard(doc, coId, res, companies.length === 1)));
+  const found = results.filter(r => r.res && r.res.o.st === "auto_confirmed").length;
+  sel.append(el("p", { class: "muted", text: `נמצא נספח מקביל ב-${found} מתוך ${companies.length} החברות שבחרת.` + (companies.length > 1 ? " טבלת סיכום של כולן מופיעה בתחתית הדף." : "") }));
+  if (companies.length > 1) box.append(overview(doc, results));
   document.getElementById("view-list").hidden = true; document.getElementById("view-compare").hidden = false;
   window.scrollTo({ top: 0 });
 }
 
-function resultCard(doc, coId, res) {
+const ST = { auto_confirmed: ["נמצא מקביל", "ok"], pending_review: ["ממתין לבדיקה", "warn"], dropped: ["המועמד הקרוב נדחה", "bad"] };
+function overview(doc, results) {
+  const heads = [[el("div", { class: "label", text: "הנספח שבחרת" }), el("strong", { text: colHead(doc) }), el("div", { class: "hname muted", text: doc.num ? `נספח ${doc.num} · ${doc.name}` : doc.name })]];
+  results.forEach(({ coId, res }) => {
+    if (!res) { heads.push([el("strong", { text: COS[coId] }), el("div", { class: "muted", text: "לא נמצא נספח מקביל" })]); return; }
+    const c = res.cand;
+    heads.push([el("strong", { text: COS[coId] }), el("div", { class: "num", text: c.num ? `#${c.no} · נספח ${c.num}` : `#${c.no}` }), el("div", { class: "hname muted", text: c.name })]);
+  });
+  const ds = [doc, ...results.map(r => r.res ? r.res.cand : null)];
+  const R = i => i ? results[i - 1].res : null;
+  const pre = [
+    { l: "הכרעה", cell: i => { if (!i) return el("span", { class: "muted", text: "הנספח שבחרת" }); const r = R(i); if (!r) return el("span", { class: "chip", text: "לא נמצא" }); const [l, k] = ST[r.o.st] || [r.o.st, ""]; return el("span", { class: `chip st-${k}`, text: l }); } },
+    { l: "אירוע עיקרי", cell: i => { const r = R(i); return r && r.ev ? EV[r.ev] || r.ev : null; } },
+    { l: "מנגנון תשלום", cell: i => { const r = R(i); return r && r.o.pay ? PAY[r.o.pay] || r.o.pay : null; } },
+    { l: "הבדלים מהותיים", cell: i => { const r = R(i); if (!r) return null; if (!r.diffs.length) return r.o.v ? el("span", { class: "muted", text: "לא נמצאו" }) : null; return el("div", { class: "clamp", title: "לחיצה מרחיבה / מקצרת" }, ...r.diffs.map(x => el("div", {}, el("strong", { text: `${x.topic}: ` }), x.document_b))); } },
+  ];
+  return el("article", { class: "panel", style: "display:grid;gap:10px" },
+    el("h2", { text: "טבלת סיכום: הנספח שבחרת מול כל החברות" }),
+    el("p", { class: "muted", style: "font-size:.88rem", text: SUMNOTE + " הצבע מסמן הבדל מול הנספח שבחרת (העמודה הראשונה)." }),
+    summaryTable(ds, heads, { pre }));
+}
+
+function resultCard(doc, coId, res, openSummary) {
   const card = el("article", { class: "panel result" });
   card.append(el("h3", { text: COS[coId] }));
   if (!res) {
@@ -417,19 +475,10 @@ function resultCard(doc, coId, res) {
   } else if (o.v) j.append(el("span", { class: "muted", text: "לא נמצאו הבדלים מהותיים." }));
   card.append(j);
 
-  const fp = el("table", { class: "grid" }, el("tr", {}, el("th", { text: "שדה" }), el("th", { text: "בנספח שבחרת" }), el("th", { text: `ב${COS[coId]}` })));
-  Object.keys(FPL).forEach(k => {
-    const a = doc.fp[k], b = cand.fp[k];
-    if (a == null && b == null) return;
-    const differ = String(a ?? "") !== String(b ?? "");
-    fp.append(el("tr", {}, el("td", { text: FPL[k] }), el("td", { class: differ ? "diff" : "", text: fmt(a) }), el("td", { class: differ ? "diff" : "", text: fmt(b) })));
-  });
-  card.append(el("span", { class: "label", text: "שדות מרכזיים זה מול זה" }), el("div", { class: "scroll" }, fp));
-
   const vt = viewerToggle([doc, cand], "הצג את שני הנספחים זה לצד זה");
-  const qaT = togglePanel("שאלות ותשובות", () => qaPanel([doc, cand], vt));
-  const fpT = togglePanel("טביעת אצבע", () => fpPanel([doc, cand]));
-  card.append(el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, qaT.btn, fpT.btn, vt.btn), qaT.panel, fpT.panel, vt.wrap);
+  const sumT = togglePanel("סיכום ההתאמה: נושא מול נושא", () => [el("p", { class: "muted", style: "font-size:.88rem", text: SUMNOTE }), summaryTable([doc, cand], [`${colHead(doc)} (שבחרת)`, colHead(cand)], { viewer: vt })]);
+  card.append(el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, sumT.btn, vt.btn), sumT.panel, vt.wrap);
+  if (openSummary) sumT.btn.click();
   card.append(markControl(`c-${doc.i}-${cand.i}`, { src: doc.id, company: coId, cand: cand.id, system: o.st, judge: o.v || null }, "ההכרעה נכונה?"));
   return card;
 }
