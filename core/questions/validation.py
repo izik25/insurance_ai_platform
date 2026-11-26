@@ -64,6 +64,20 @@ def _words(text: str) -> set[str]:
     return {_strip_prefix(w) for w in _WORD.findall(text)}
 
 
+# "ללא השתתפות עצמית" printed in the appendix (often in its title) is a
+# definite answer - Hachshara 535 / Menorah 709 came back NOT_FOUND for it.
+_EXPLICIT_NO_DEDUCTIBLE = re.compile(r"ללא\s+השתתפות\s+(?:ה)?עצמית|השתתפות\s+עצמית\s*[:.]?\s*אין(?![א-ת])")
+
+
+def explicit_no_deductible(document_text: str) -> str | None:
+    """The sentence where the appendix itself says there is no deductible."""
+    match = _EXPLICIT_NO_DEDUCTIBLE.search(document_text or "")
+    if not match:
+        return None
+    start = max(0, match.start() - 80)
+    return " ".join(document_text[start : match.end() + 40].split())
+
+
 def validate_answers(batch: QuestionAnswerBatch, document_text: str) -> dict[str, str]:
     """Downgrades unsupported FOUND answers to AMBIGUOUS in place and returns
     {question_id: reason} for each one it changed."""
@@ -72,6 +86,13 @@ def validate_answers(batch: QuestionAnswerBatch, document_text: str) -> dict[str
     reasons: dict[str, str] = {}
 
     for answer in batch.answers:
+        if answer.question_id == _DEDUCTIBLE_QUESTION and answer.status == "NOT_FOUND":
+            quote = explicit_no_deductible(document_text)
+            if quote:
+                answer.status = "FOUND"
+                answer.answer_text = "אין השתתפות עצמית (הנספח קובע זאת במפורש)."
+                answer.evidence_text = quote
+                reasons[answer.question_id] = "changed NOT_FOUND->FOUND: the appendix says there is no deductible"
         if answer.status != "FOUND":
             continue
 

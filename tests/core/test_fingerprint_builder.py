@@ -319,3 +319,10 @@ def test_review_round1_period_and_age_guards() -> None:
     assert result.min_entry_age is None
     # The age quote never ends the coverage at 75.
     assert result.termination_age is None
+
+
+def test_condition_specific_waiting_period_keeps_text_not_days() -> None:
+    text = 'שבץ מוחי: חייבת להתקיים עדות לנזק נוירולוגי הנמשך מעל 6 שבועות. תקופה זו מהווה תקופת המתנה.'
+    result = _build(_profile(waiting_period_text=text))
+    assert result.waiting_period_days is None
+    assert result.waiting_period_raw == text

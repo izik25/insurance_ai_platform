@@ -164,3 +164,13 @@ def test_amount_answer_quoting_the_deductible_is_downgraded() -> None:
     assert batch.answers[0].status == "AMBIGUOUS"
     assert "deductible" in reasons["base.insurance_amount_details"]
     assert batch.answers[1].status == "FOUND"
+
+
+def test_explicit_no_deductible_in_document_is_an_answer() -> None:
+    document = "ניתוחים וטיפולים מחליפי הניתוח בישראל (ניתוחים משלים שב\"ן ללא השתתפות עצמית) 535 נספח מספר"
+    batch = _batch(QuestionAnswerItem(question_id="base.deductible_exists", status="NOT_FOUND"))
+    reasons = validate_answers(batch, document)
+    assert batch.answers[0].status == "FOUND"
+    assert "אין השתתפות עצמית" in batch.answers[0].answer_text
+    assert "ללא השתתפות עצמית" in batch.answers[0].evidence_text
+    assert "base.deductible_exists" in reasons

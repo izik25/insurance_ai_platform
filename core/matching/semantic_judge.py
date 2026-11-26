@@ -208,8 +208,20 @@ _VAGUE_DIFFERENCE = re.compile(
 )
 
 
+# "Not stated explicitly that the doctor must be Israeli" is a hedge about
+# sameness, not a difference; and when BOTH sides only speculate ("there may
+# be an exception..."), there is nothing to compare.
+_NOT_EXPLICIT = re.compile(r"לא צוין במפורש|לא נאמר במפורש")
+_SPECULATIVE = re.compile(r"ייתכן|ייתכנו|אפשרות פרשנות|לא פורש|לא פורטו|כנראה")
+
+
 def is_vague_difference(document_a: str, document_b: str) -> bool:
-    return bool(_VAGUE_DIFFERENCE.search(document_a or "") or _VAGUE_DIFFERENCE.search(document_b or ""))
+    a, b = document_a or "", document_b or ""
+    if _VAGUE_DIFFERENCE.search(a) or _VAGUE_DIFFERENCE.search(b):
+        return True
+    if _NOT_EXPLICIT.search(a) or _NOT_EXPLICIT.search(b):
+        return True
+    return bool(_SPECULATIVE.search(a) and _SPECULATIVE.search(b))
 
 
 class MaterialDifference(BaseModel):

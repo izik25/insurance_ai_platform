@@ -50,3 +50,12 @@ def test_vague_material_differences_are_dropped() -> None:
         ],
     )
     assert [d.topic for d in verdict.material_differences] == ["גיל סיום"]
+
+
+def test_hedged_and_mutually_speculative_differences_are_dropped() -> None:
+    from core.matching.semantic_judge import is_vague_difference
+
+    assert is_vague_difference("נדרש רופא מומחה, אך לא צוין במפורש שהרופא מישראל.", "נדרש רופא מומחה בישראל.")
+    assert is_vague_difference("ייתכנו מקרים בהם לא יוחרג", "לא פורטו מקרים, פרט לאפשרות פרשנות")
+    assert not is_vague_difference("לא מוזכר בנספח (ייתכן מגבלה כללית)", "הכיסוי מסתיים בגיל 75")
+    assert not is_vague_difference("85", "75")

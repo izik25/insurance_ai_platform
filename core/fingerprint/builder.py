@@ -60,6 +60,10 @@ _STAYS_ALIVE = re.compile(
 # A recurrence / second-event interval is not a waiting period of the
 # policy (AIG Extra Care: "recurring cancer only after 5 years" became a
 # 1,825-day waiting period).
+_CONDITION_SPECIFIC = re.compile(
+    r"שבץ|טרשת|ALS|ניוון שרירים|דלקת מוח|דמנציה|אילמות|אובדן דיבור|תשישות|סוכרת|סכרת|"
+    r"השתלת (?:לב|כבד|כליה|ריאה|ראות|מח)|קרויצפלד|גילאן|פרקינסון|אלצהיימר"
+)
 _RECURRENCE_MARKERS = re.compile(r"חוזר|הישנות|מקרה (?:ביטוח )?שני|מחלה נוספת|מקרה נוסף")
 # "נפטר המבוטח בתוך 14 ימים ... תשלם החברה פיצוי" pays ON death - the
 # opposite of a survival period (Direct 203/01).
@@ -257,7 +261,7 @@ def build_fingerprint(
         benefit_model=benefit_model,
         target_population=target_population,
         waiting_period_days=waiting_days,
-        waiting_period_raw=periods["waiting"],
+        waiting_period_raw=periods["waiting"] or periods.get("waiting_specific"),
         qualifying_period_days=qualifying_days,
         qualifying_period_raw=periods["qualifying"],
         survival_period_days=survival_days,
@@ -402,6 +406,13 @@ def _sanitize_periods(
                         f"{slot} period dropped (same text as another period field): {text}"
                     )
 
+    if result["waiting"] and _CONDITION_SPECIFIC.search(result["waiting"]):
+        # A waiting period that exists only for named diseases/transplant types
+        # (stroke 6 weeks, ALS 3 months...) is not the policy's waiting period;
+        # the text stays in waiting_period_raw, the day count is dropped.
+        adjustments.append(f"waiting period days dropped (applies to specific conditions only): {result['waiting']}")
+        result["waiting_specific"] = result["waiting"]
+        result["waiting"] = None
     if result["waiting"] and _RECURRENCE_MARKERS.search(result["waiting"]) and not _WAITING_MARKERS.search(result["waiting"]):
         adjustments.append(f"waiting period dropped (a recurrence/second-event interval): {result['waiting']}")
         result["waiting"] = None
