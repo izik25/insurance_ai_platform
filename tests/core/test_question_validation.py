@@ -105,3 +105,62 @@ def test_real_waiting_period_mentioning_survival_word_is_kept() -> None:
     )
     validate_answers(batch, document)
     assert batch.answers[0].status == "FOUND"
+
+
+def test_debt_set_off_and_if_any_mention_are_not_a_deductible() -> None:
+    # Client review 2026-11: Harel 481 (set-off) and Harel 466 (indexation boilerplate).
+    document = (
+        "החברה רשאית לנכות מסכום הביטוח המשולם למוטב, כל חוב המגיע לה מהמבוטח על פי פוליסה זו. "
+        "כל הסכומים הנקובים בפוליסה זו, לרבות סכומי הביטוח, הפרמיות וגובה ההשתתפות העצמית (אם קיימת) "
+        "צמודים למדד. השתתפות עצמית בגובה 5,000 ₪ למקרה ביטוח."
+    )
+    set_off = QuestionAnswerItem(
+        question_id="base.deductible_exists",
+        status="FOUND",
+        answer_text="קיימת השתתפות עצמית עקב חוב שניתן לנכות מסכום הביטוח.",
+        evidence_text="החברה רשאית לנכות מסכום הביטוח המשולם למוטב, כל חוב המגיע לה מהמבוטח",
+    )
+    batch = _batch(set_off)
+    reasons = validate_answers(batch, document)
+    assert batch.answers[0].status == "NOT_FOUND"
+    assert "set-off" in reasons["base.deductible_exists"]
+
+    boilerplate = _batch(QuestionAnswerItem(
+        question_id="base.deductible_exists",
+        status="FOUND",
+        answer_text="במסמך מצוין כי קיימת השתתפות עצמית הצמודה למדד.",
+        evidence_text="וגובה ההשתתפות העצמית (אם קיימת) צמודים למדד",
+    ))
+    validate_answers(boilerplate, document)
+    assert boilerplate.answers[0].status == "NOT_FOUND"
+
+    real = _batch(QuestionAnswerItem(
+        question_id="base.deductible_exists",
+        status="FOUND",
+        answer_text="קיימת השתתפות עצמית של 5,000 ₪ לכל מקרה ביטוח.",
+        evidence_text="השתתפות עצמית בגובה 5,000 ₪ למקרה ביטוח",
+    ))
+    assert validate_answers(real, document) == {}
+    assert real.answers[0].status == "FOUND"
+
+
+def test_amount_answer_quoting_the_deductible_is_downgraded() -> None:
+    document = "כיסוי מלא בניכוי השתתפות עצמית למקרה ביטוח בגובה 5,000 ₪. סכום הביטוח 150,000 ש\"ח."
+    batch = _batch(
+        QuestionAnswerItem(
+            question_id="base.insurance_amount_details",
+            status="FOUND",
+            answer_text="סכום ההשתתפות העצמית הוא 5,000 ₪, זהו סכום הביטוח.",
+            evidence_text="בניכוי השתתפות עצמית למקרה ביטוח בגובה 5,000 ₪",
+        ),
+        QuestionAnswerItem(
+            question_id="base.insurance_amount_exists",
+            status="FOUND",
+            answer_text="כן, 150,000 ש\"ח ללא השתתפות עצמית.",
+            evidence_text="סכום הביטוח 150,000 ש\"ח",
+        ),
+    )
+    reasons = validate_answers(batch, document)
+    assert batch.answers[0].status == "AMBIGUOUS"
+    assert "deductible" in reasons["base.insurance_amount_details"]
+    assert batch.answers[1].status == "FOUND"

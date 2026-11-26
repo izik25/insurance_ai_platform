@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -156,6 +157,19 @@ _SYSTEM_PROMPT = """\
 החזר גם נימוק קצר (עד 2 משפטים) בעברית, ו-material_differences: רשימת \
 ההבדלים המהותיים בין שני המסמכים (נושא, מה כתוב ב-A, מה כתוב ב-B), בעברית. \
 רשימה ריקה אם אין הבדלים.
+
+כללים ל-material_differences:
+- כל צד חייב להיות קביעה ברורה: מה הנספח קובע (עם המספר אם יש), או "לא מכוסה \
+בנספח" כשהנספח מפרט רשימה סגורה של מה שמכוסה והנושא לא בה, או "לא מוזכר \
+בנספח". אסור לנסח בערפול כמו "לא צוין במפורש ככיסוי עיקרי" או "ייתכנו הבדלים".
+- רשום הבדל רק כשיש לפחות צד אחד עם מידע ממשי. אם בשני הצדדים אין מידע - זה \
+אינו הבדל.
+- סכום ביטוח: תקרה של מקרה מסוים או של כיסוי משני (סרטן מוקדם, סוכרת נעורים, \
+התייעצות, טיפול ניסיוני, אחוז מסכום הביטוח) אינה סכום הביטוח - כתוב אותה \
+כהבדל בנושא של אותו מקרה, לא כ"סכום ביטוח מקסימלי". כשבשני הנספחים סכום \
+הביטוח נקבע בדף פרטי הביטוח - אין כאן הבדל.
+- השתתפות עצמית: רק סכום/אחוז שהמבוטח נושא בכל תביעה. זכות החברה לקזז חוב או \
+פרמיה מהתגמול, או משפט כללי "(אם קיימת)", אינם השתתפות עצמית.
 """
 
 _JUDGE_JSON_SCHEMA = {
@@ -184,6 +198,18 @@ _JUDGE_JSON_SCHEMA = {
         },
     },
 }
+
+
+# "Similar, but there may be subtle differences" is not a difference - the
+# prompt forbids it, the model still wrote it on ~8% of pairs (2026-11 review
+# round), so such entries are dropped in code.
+_VAGUE_DIFFERENCE = re.compile(
+    r"ייתכנו הבדלים|ייתכן שקיימים הבדלים|ייתכן שיש הבדלים|הבדלים דקים|הבדלים קלים|ייתכנו שינויים"
+)
+
+
+def is_vague_difference(document_a: str, document_b: str) -> bool:
+    return bool(_VAGUE_DIFFERENCE.search(document_a or "") or _VAGUE_DIFFERENCE.search(document_b or ""))
 
 
 class MaterialDifference(BaseModel):
@@ -216,6 +242,9 @@ class JudgeVerdict(BaseModel):
             self.verdict = "same_coverage"
         else:
             self.verdict = "uncertain"
+        self.material_differences = [
+            d for d in self.material_differences if not is_vague_difference(d.document_a, d.document_b)
+        ]
         return self
 
 

@@ -28,7 +28,9 @@ from pydantic import BaseModel, Field
 # v2: prompt prefers question-bank answers over the earlier extracted
 # fields, defines the three period types by meaning, and excludes
 # deductibles/premiums from amounts and premium bands from entry ages.
-PROFILE_VERSION = "v2"
+# v3: amounts = the main coverage's own sum only (no sub-limits, examples or
+# "per policy schedule" placeholders), stricter deductible (client review 2026-11).
+PROFILE_VERSION = "v3"
 CODES_VERSION = "v1"
 
 

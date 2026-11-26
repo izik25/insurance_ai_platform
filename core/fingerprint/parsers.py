@@ -38,9 +38,17 @@ PERIOD_UNIT_TO_DAYS = {
     "ימים": 1,
     "יום": 1,
 }
+# The unit may carry the definite article ("90 הימים הראשונים", "14 הימים
+# הסמוכים" - Phoenix 191 / Direct 220/01 came out as no period at all).
 _PERIOD_PATTERN = re.compile(
-    r"(\d+)\s*(שנתיים|שנים|שנה|שבועות|שבוע|חודשים|חודש|ימים|יום|שעות|שעה)"
+    r"(\d+)\s*ה?(שנתיים|שנים|שנה|שבועות|שבוע|חודשים|חודש|ימים|יום|שעות|שעה)"
 )
+# "שנתיים וחצי" / "שנה וחצי" - counted in months like the "(30 חודשים)" the
+# same clauses usually spell out (Ayalon 1120 came out as 730 days).
+_HALF_YEAR_PATTERN = re.compile(r"(?<![א-ת])(שנתיים|שנה|(\d+)\s*שנים)\s+וחצי")
+# Any unit word and any number, for the last-resort fallback below.
+_ANY_UNIT = re.compile(r"(?<![א-ת])ה?(שנים|שנה|שבועות|שבוע|חודשים|חודש|ימים|יום)(?![א-ת])")
+_ANY_NUMBER = re.compile(r"(?<![\d.,])(\d{1,3})(?![\d.,]*\d)")
 
 # Spelled-out numbers ("שלושה חודשים", "שנים עשר חודשים") - confirmed live:
 # Menorah appendix 108's waiting period is written "שלושה חודשים" and came
@@ -90,6 +98,11 @@ def parse_period_to_days(text: str | None) -> int | None:
         return None
     candidates: list[tuple[int, int | None]] = []
 
+    match = _HALF_YEAR_PATTERN.search(text)
+    if match:
+        years = 2 if match.group(1) == "שנתיים" else 1 if match.group(1) == "שנה" else int(match.group(2))
+        candidates.append((match.start(), (years * 12 + 6) * 30))
+
     match = _PERIOD_PATTERN.search(text)
     if match:
         number = int(match.group(1))
@@ -123,8 +136,20 @@ def parse_period_to_days(text: str | None) -> int | None:
         match = _REVERSED_PERIOD_PATTERN.search(text)
         if match and 0 < int(match.group(2)) < 1000:
             return int(match.group(2)) * PERIOD_UNIT_TO_DAYS[match.group(1)]
+        # Last resort for scrambled RTL text whose number landed far from its
+        # unit (Direct 92/01: "תקופת אכשרה ימים אלא אם מפורט אחרת ... הביטוח90"):
+        # only when the text holds exactly one number and one kind of unit,
+        # so there is nothing to pair up wrongly.
+        units = {PERIOD_UNIT_TO_DAYS[m.group(1)] for m in _ANY_UNIT.finditer(text)}
+        numbers = {int(n) for n in _ANY_NUMBER.findall(text)}
+        if len(units) == 1 and len(numbers) == 1 and 0 < next(iter(numbers)) < 1000:
+            return next(iter(numbers)) * next(iter(units))
         return None
-    return min(candidates, key=lambda c: c[0])[1]
+    # A "N וחצי" match starts at the same place as the plain unit inside it
+    # and must win over it.
+    first = min(c[0] for c in candidates)
+    at_first = [c for c in candidates if c[0] == first]
+    return max(at_first, key=lambda c: c[1] or 0)[1]
 
 
 # "יחידות סכום ביטוח" (insurance-amount UNITS) is Migdal's indexed-unit
@@ -212,4 +237,8 @@ def numbers_mentioned(text: str) -> set[str]:
     for dual, days in DUAL_TO_DAYS.items():
         if dual in text:
             numbers.add(str(days))
+    # "שנתיים וחצי" supports the same 900 days parse_period_to_days gives it.
+    for match in _HALF_YEAR_PATTERN.finditer(text):
+        years = 2 if match.group(1) == "שנתיים" else 1 if match.group(1) == "שנה" else int(match.group(2))
+        numbers.add(str((years * 12 + 6) * 30))
     return numbers

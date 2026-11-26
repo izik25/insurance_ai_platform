@@ -32,7 +32,9 @@ from core.questions.validation import STAYS_ALIVE
 # question-bank answers, amount/age filtering, non-coverage-document flag),
 # added after a 10-appendix manual review found these exact failure modes
 # in v1 fingerprints.
-FINGERPRINT_VERSION = "v2"
+# v3: amounts and caps exclude sub-limits of a specific event, example figures
+# and any figure equal to the deductible (client review, 2026-11).
+FINGERPRINT_VERSION = "v3"
 
 # The (exists, details) question-bank pair behind each period field.
 _PERIOD_QUESTIONS = {
@@ -47,7 +49,18 @@ _SURVIVAL_MARKERS = re.compile(r"לא נפטר|בחיים|חי בתום|חיה �
 # Stricter than _SURVIVAL_MARKERS: wording in the document itself that the
 # insured must stay alive (not the label "הישרדות", which an LLM answer may
 # attach to the wrong clause).
-_STAYS_ALIVE = re.compile(r"לא נפטר|בחיים|חי בתום|חיה בתום|יישאר|תישאר")
+_STAYS_ALIVE = re.compile(
+    r"לא נפטר|בחיים|חי בתום|חיה בתום|יישאר|תישאר|לשרוד|ישרוד|תשרוד|שישרוד"
+    # "if the insured died within 7 days ... no benefit is paid" is a
+    # survival condition too (client review 2026-11: AIG Extra Care, Hachshara
+    # 178, Migdal 2150 lost real 7/14-day survival periods to the
+    # payment-on-death check below).
+    r"|לא\s+(?:ישלם|ישולם|ישולמו|תשולם|תשלם|יהיה זכאי|תהיה זכאית|יהיה חייב|תהיה חייבת)"
+)
+# A recurrence / second-event interval is not a waiting period of the
+# policy (AIG Extra Care: "recurring cancer only after 5 years" became a
+# 1,825-day waiting period).
+_RECURRENCE_MARKERS = re.compile(r"חוזר|הישנות|מקרה (?:ביטוח )?שני|מחלה נוספת|מקרה נוסף")
 # "נפטר המבוטח בתוך 14 ימים ... תשלם החברה פיצוי" pays ON death - the
 # opposite of a survival period (Direct 203/01).
 _DEATH_BENEFIT = re.compile(r"נפטר|פטירה|מוות")
@@ -68,9 +81,54 @@ _PER_UNIT_MARKERS = re.compile(
     r"|(?:לכל|בכל) (?:התייעצות|טיפול|ביקור|יום|פגישה|מפגש)"
 )
 
+# Sub-limits of one specific event or secondary benefit, not the sum
+# insured of the coverage (client review 2026-11: Clal 2670's 50,000 ₪
+# early-cancer cap, Direct 216/02's 300,000 ₪ juvenile-diabetes cap and
+# Harel 466's 20%/10%-of-sum extras all sat in benefit_amount_* as if they
+# were the policy's sum insured). Also example figures from illustrations.
+_SUB_LIMIT_MARKERS = re.compile(
+    r"מוקדם|טרום|סוכרת|סכרת|ניסיוני|לדוגמה|לדוגמא|למשל|\d\s*%|אחוז|מסכום הביטוח"
+    r"|התייעצות|חוות דעת|מלווה|שהיה|שהייה|לינה|הטסה|טיסה|טיסות|קצבה|גמלה|מומחה"
+)
+
+
+def _main_coverage_amounts(
+    texts: list[str], kind: str, deductible_amount: float | None, adjustments: list[str]
+) -> list[str]:
+    """The amount/cap strings that describe the main coverage itself -
+    deductibles, premiums, per-unit limits, sub-limits of one event, and any
+    figure equal to the deductible (Clal 4154's 5,000 ₪ deductible also came
+    back as a "5,000 ₪ maximum per claim") stay in amount_raw/caps_raw but
+    out of the numeric fields; every exclusion is logged."""
+    kept = []
+    for text in texts:
+        parsed = parse_amount(text)
+        if _NOT_A_BENEFIT_MARKERS.search(text):
+            adjustments.append(f"{kind} excluded (deductible/premium): {text}")
+        elif _PER_UNIT_MARKERS.search(text):
+            adjustments.append(f"{kind} excluded from min/max (per-unit limit): {text}")
+        elif _SUB_LIMIT_MARKERS.search(text):
+            adjustments.append(f"{kind} excluded (sub-limit of a specific event or an example): {text}")
+        elif parsed and deductible_amount is not None and parsed[0] == deductible_amount:
+            adjustments.append(f"{kind} excluded (same figure as the deductible): {text}")
+        else:
+            kept.append(text)
+    return kept
+
+
 # Age text that describes premium bands, not who may join.
 _PREMIUM_MARKERS = re.compile(r"פרמיה|דמי ביטוח|דמי הביטוח|תעריף|עלות|מחיר")
 _ENTRY_MARKERS = re.compile(r"הצטרפות|להצטרף|מצטרף|כניסה|יבוטח|לבטח|יתקבל")
+# An age in a clause about when a disease appeared, not who may join (Clal
+# 2909: "a disease first found after joining and before age 3").
+_DISEASE_AGE_MARKERS = re.compile(r"לפני הגיעו|התגלתה|שהתגלו|נתגלו|אובחנה|אובחן")
+# Wording that ends the coverage at an age. Without it in the question-bank
+# quote a "termination age" is unsupported (Migdal 2360: "גיל עד גיל 66" is a
+# premium-table header, the same table prices "66 ואילך").
+_TERMINATION_MARKERS = re.compile(
+    r"סיום|יסתיים|תסתיים|מסתיים|מסתיימת|יפוג|תפוג|תפוגת|פקיעה|יפקע|תפקע|פוקע|תום|"
+    r"הגיעו|הגעתו|הגיע המבוטח|בהגיע|מלאו|ביום הולדתו|גיל מירבי|גיל מרבי|הגיל המירבי|הגיל המרבי"
+)
 # A quote containing prices is a premium table, whatever else it says.
 _PRICE_MARKERS = re.compile(r"פרמיה|דמי ביטוח|דמי הביטוח|תעריף|עלות|מחיר|שקלים|₪|ש\"ח|ש״ח")
 _AGE_QUESTION = "base.age_limitations"
@@ -165,27 +223,21 @@ def build_fingerprint(
     qualifying_days = parse_period_to_days(periods["qualifying"])
     survival_days = parse_period_to_days(periods["survival"])
 
-    benefit_amounts = []
-    for amount_text in profile.amounts:
-        if _NOT_A_BENEFIT_MARKERS.search(amount_text):
-            adjustments.append(f"amount excluded (deductible/premium): {amount_text}")
-        elif _PER_UNIT_MARKERS.search(amount_text):
-            adjustments.append(f"amount excluded from min/max (per-unit limit): {amount_text}")
-        else:
-            benefit_amounts.append(amount_text)
-    amount_matches = [m for m in (parse_amount(a) for a in benefit_amounts) if m]
-    amount_min = min((v for v, _c in amount_matches), default=None)
-    amount_max = max((v for v, _c in amount_matches), default=None)
-    amount_currency = next((c for _v, c in amount_matches if c), None)
-
-    cap_matches = [m for m in (parse_amount(c) for c in profile.caps) if m]
-    maximum_benefit = max((v for v, _c in cap_matches), default=None)
-
     deductible_amount = None
     if profile.deductible.applies and profile.deductible.amount_text:
         parsed = parse_amount(profile.deductible.amount_text)
         if parsed:
             deductible_amount = parsed[0]
+
+    benefit_amounts = _main_coverage_amounts(profile.amounts, "amount", deductible_amount, adjustments)
+    amount_matches = [m for m in (parse_amount(a) for a in benefit_amounts) if m]
+    amount_min = min((v for v, _c in amount_matches), default=None)
+    amount_max = max((v for v, _c in amount_matches), default=None)
+    amount_currency = next((c for _v, c in amount_matches if c), None)
+
+    caps = _main_coverage_amounts(profile.caps, "cap", deductible_amount, adjustments)
+    cap_matches = [m for m in (parse_amount(c) for c in caps) if m]
+    maximum_benefit = max((v for v, _c in cap_matches), default=None)
 
     benefit_percentage = parse_percentage(profile.benefit_calculation)
 
@@ -212,7 +264,7 @@ def build_fingerprint(
         survival_period_raw=periods["survival"],
         min_entry_age=min_age,
         max_entry_age=max_age,
-        termination_age=profile.age_restrictions.termination_age,
+        termination_age=_sanitize_termination_age(profile, answer_statuses or {}, answer_texts or {}, adjustments),
         age_raw=profile.age_restrictions.description,
         benefit_type=benefit_type_code or profile.benefit_type,
         benefit_amount_min=amount_min,
@@ -350,6 +402,10 @@ def _sanitize_periods(
                         f"{slot} period dropped (same text as another period field): {text}"
                     )
 
+    if result["waiting"] and _RECURRENCE_MARKERS.search(result["waiting"]) and not _WAITING_MARKERS.search(result["waiting"]):
+        adjustments.append(f"waiting period dropped (a recurrence/second-event interval): {result['waiting']}")
+        result["waiting"] = None
+
     for slot in slots:
         if not result[slot]:
             continue
@@ -383,6 +439,9 @@ def _sanitize_entry_ages(
         return None, None
     evidence = (answer_texts.get(_AGE_QUESTION) or (None, None))[1]
     if evidence:
+        if _DISEASE_AGE_MARKERS.search(evidence):
+            adjustments.append(f"entry ages dropped (the age is about when a disease appeared): {evidence}")
+            return None, None
         if not _ENTRY_MARKERS.search(evidence) or _PRICE_MARKERS.search(evidence):
             adjustments.append(f"entry ages dropped (quote is not an entry limit): {evidence}")
             return None, None
@@ -398,3 +457,26 @@ def _sanitize_entry_ages(
         adjustments.append(f"max entry age dropped (same as coverage end age): {description}")
         max_age = None
     return min_age, max_age
+
+
+def _sanitize_termination_age(
+    profile: CanonicalCoverageProfile,
+    answer_statuses: dict[str, str],
+    answer_texts: dict[str, tuple[str | None, str | None]],
+    adjustments: list[str],
+) -> int | None:
+    """The coverage end age only when the question bank backs it: dropped if
+    the age question found nothing, or if its quote has no coverage-ending
+    wording or doesn't contain that age at all (a premium-table header is
+    not an end age)."""
+    age = profile.age_restrictions.termination_age
+    if age is None:
+        return None
+    if answer_statuses.get(_AGE_QUESTION) in ("NOT_FOUND", "NOT_APPLICABLE"):
+        adjustments.append(f"termination age {age} dropped (question bank found no age limit)")
+        return None
+    evidence = (answer_texts.get(_AGE_QUESTION) or (None, None))[1]
+    if evidence and (not _TERMINATION_MARKERS.search(evidence) or str(age) not in numbers_mentioned(evidence)):
+        adjustments.append(f"termination age {age} dropped (quote does not end the coverage at that age): {evidence}")
+        return None
+    return age

@@ -273,3 +273,49 @@ def test_survival_clause_quoted_as_waiting_period_is_dropped() -> None:
     result = _gated(profile, statuses, texts)
     assert result.waiting_period_days is None
     assert result.survival_period_days == 14
+
+
+def test_sub_limits_examples_and_deductible_figure_excluded() -> None:
+    # Client review 2026-11: Clal 2670 / Direct 216/02 / Harel 466 / Clal 4154.
+    amounts = [
+        'פיצוי עד 50,000 ש"ח בגין מקרה סרטן מוקדם',
+        "פיצוי עבור מחלת סכרת נעורים מוגבל לתקרה של 300,000 ₪.",
+        "פיצוי חד פעמי נוסף של 10% מסכום הביטוח ועד 20,000 ₪ לצינתור כלילי טיפולי",
+        "סכום ביטוח שנרכש, לדוגמה 10,000 ₪",
+        "₪ 25,000 סכום מקסימלי לתביעות עבור ניתוח פרטי בישראל",
+    ]
+    caps = ["לא יותר מ- 15% מתגמולי הביטוח ולא יותר מ- ₪ 50,000", "תקרה כוללת 400,000 ₪"]
+    result = _build(_profile(amounts=amounts, caps=caps))
+    assert result.benefit_amount_min is None
+    assert result.benefit_amount_max is None
+    assert result.maximum_benefit == 400000.0
+    assert result.amount_raw == amounts
+    assert sum("sub-limit" in a for a in result.raw_features["sanity_adjustments"]) == 5
+    assert any("same figure as the deductible" in a for a in result.raw_features["sanity_adjustments"])
+
+
+def test_review_round1_period_and_age_guards() -> None:
+    # Survival worded as non-payment on death (AIG Extra Care) is kept.
+    survival = "המבטח לא ישלם תגמולי ביטוח אם נפטר המבוטח בתוך 7 ימים ממועד האבחון"
+    statuses = {"base.survival_period_details": "FOUND", "base.age_limitations": "FOUND",
+                "base.waiting_period_details": "FOUND"}
+    texts = {
+        "base.survival_period_details": ("7 ימים", "אם... נפטר המבוטח בתוך 7 ימים ממועד האבחון לא ישלם המבטח"),
+        "base.waiting_period_details": ("5 שנים", "תגמולי אבחון עבור סרטן חוזר לאחר 5 שנים"),
+        "base.age_limitations": ("", "מחלה שהתגלתה לראשונה לאחר הצטרפותו של המבוטח לפוליסה ולפני הגיעו לגיל 3"),
+    }
+    profile = _profile(
+        survival_period_text=survival,
+        waiting_period_text="תגמולי אבחון עבור סרטן חוזר לאחר 5 שנים (60 חודשים) ממועד האבחנה הקודמת",
+        age_restrictions=AgeRestrictions(min_age=3, termination_age=75, description="הצטרפות"),
+    )
+    result = build_fingerprint(
+        main_category="HEALTH", coverage_family=None, coverage_subtype=None, benefit_model=None,
+        target_population=None, profile=profile, benefit_type_code=None,
+        answer_statuses=statuses, answer_texts=texts,
+    )
+    assert result.survival_period_days == 7
+    assert result.waiting_period_days is None
+    assert result.min_entry_age is None
+    # The age quote never ends the coverage at 75.
+    assert result.termination_age is None

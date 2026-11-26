@@ -129,6 +129,10 @@ def _save_result(
         scope_by_id[question.question_id] = "base" if question.question_id in base_ids else "category"
 
     with session_scope() as session:
+        # A --force re-run replaces this document's earlier answers/findings;
+        # appending would leave two answers per question for every reader.
+        session.query(DocumentQuestionAnswer).filter_by(document_id=document_id).delete()
+        session.query(DocumentAdditionalFinding).filter_by(document_id=document_id).delete()
         for answer in result.answers:
             row = DocumentQuestionAnswer(
                 document_id=document_id,

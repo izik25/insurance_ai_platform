@@ -35,3 +35,18 @@ def test_model_supplied_verdict_is_overridden() -> None:
         reasoning="גיל סיום שונה",
     )
     assert verdict.verdict == "same_coverage"
+
+
+def test_vague_material_differences_are_dropped() -> None:
+    from core.matching.semantic_judge import JudgeVerdict
+
+    verdict = JudgeVerdict(
+        core_insured_event="same",
+        core_payment_mechanism="same",
+        reasoning="r",
+        material_differences=[
+            {"topic": "חריגים", "document_a": "רשימה מפורטת", "document_b": "רשימה דומה, אך ייתכנו הבדלים דקים בניסוח"},
+            {"topic": "גיל סיום", "document_a": "85", "document_b": "75"},
+        ],
+    )
+    assert [d.topic for d in verdict.material_differences] == ["גיל סיום"]

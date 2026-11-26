@@ -5,7 +5,9 @@ A FOUND answer is downgraded to AMBIGUOUS when it cites a number that does
 not appear anywhere in the document (confirmed live: a scanned Hachshara
 appendix whose OCR read "0? יום" got a confident "90 יום" answer - a
 plausible guess, but a guess), or when its evidence quote has too little
-overlap with the document to be a real quote. The reason is returned per
+overlap with the document to be a real quote. A FOUND deductible answer
+that only quotes a debt set-off or an "if any" mention (no amount) becomes
+NOT_FOUND - that clause is not a deductible. The reason is returned per
 question so callers can persist it alongside the answer; nothing is
 dropped.
 """
@@ -38,6 +40,16 @@ STAYS_ALIVE = re.compile(
     r"|(?:המבוטח|המבוטחת)\s+(?:חי|חיה|יהיה|תהיה)\s"
     r"|(?:חי|חיה)\s+(?:תקופה|במשך|לפחות)"
 )
+_DEDUCTIBLE_QUESTION = "base.deductible_exists"
+# Clauses an answer has mistaken for a deductible (client review 2026-11):
+# Harel 481's "החברה רשאית לנכות מסכום הביטוח ... כל חוב" is a debt set-off,
+# Harel 466's "גובה ההשתתפות העצמית (אם קיימת)" is indexation boilerplate.
+_NOT_A_DEDUCTIBLE = re.compile(r"לנכות|לקזז|קיזוז|כל חוב|ניכוי חוב|אם קיימת|אם קיים\b|אם ישנה|אם יש")
+# A real deductible clause states its size.
+_AMOUNT_OR_PERCENT = re.compile(r"\d[\d,.]*\s*(?:₪|ש\"ח|ש״ח|שקל|%|אחוז|ימים|יום)|(?:₪|ש\"ח|ש״ח)\s*\d")
+_AMOUNT_QUESTIONS = {"base.insurance_amount_details", "base.insurance_amount_exists"}
+_DEDUCTIBLE_WORD = re.compile(r"השתתפות(?:\s+ה?עצמית)?")
+_NO_DEDUCTIBLE = re.compile(r"(?:ללא|אין|לא כולל|בלי)\s+השתתפות")
 _PERIOD_DETAIL_QUESTIONS = {
     "base.waiting_period_details": re.compile(r"המתנה|המתנת"),
     "base.qualifying_period_details": re.compile(r"אכשרה"),
@@ -75,8 +87,31 @@ def validate_answers(batch: QuestionAnswerBatch, document_text: str) -> dict[str
             answer.status = "AMBIGUOUS"
             continue
 
-        own_marker = _PERIOD_DETAIL_QUESTIONS.get(answer.question_id)
         evidence = answer.evidence_text or ""
+        if answer.question_id == _DEDUCTIBLE_QUESTION:
+            stated = f"{answer.answer_text or ''} {evidence}"
+            if _NOT_A_DEDUCTIBLE.search(stated) and not _AMOUNT_OR_PERCENT.search(stated):
+                reasons[answer.question_id] = (
+                    "changed FOUND->NOT_FOUND: the quoted clause is a debt set-off or an "
+                    "'if any' mention, not a deductible the appendix sets"
+                )
+                answer.status = "NOT_FOUND"
+                continue
+
+        amount_text = answer.answer_text or ""
+        if (
+            answer.question_id in _AMOUNT_QUESTIONS
+            and _DEDUCTIBLE_WORD.search(amount_text)
+            and not _NO_DEDUCTIBLE.search(amount_text)
+        ):
+            # Clal 4154 / AIG surgeries: "the 5,000 ₪ deductible is the sum insured".
+            reasons[answer.question_id] = (
+                "downgraded FOUND->AMBIGUOUS: the answer gives the deductible as the sum insured"
+            )
+            answer.status = "AMBIGUOUS"
+            continue
+
+        own_marker = _PERIOD_DETAIL_QUESTIONS.get(answer.question_id)
         if own_marker and STAYS_ALIVE.search(evidence) and not own_marker.search(evidence):
             reasons[answer.question_id] = (
                 "downgraded FOUND->AMBIGUOUS: the quoted clause requires the insured to stay "

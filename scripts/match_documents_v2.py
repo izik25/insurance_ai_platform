@@ -183,8 +183,9 @@ _JUDGE_FINGERPRINT_FIELDS = (
     ("max_entry_age", "גיל כניסה מקסימלי"),
     ("termination_age", "גיל סיום כיסוי"),
     ("benefit_type", "סוג תגמול"),
-    ("benefit_amount_max", "סכום ביטוח מקסימלי"),
-    ("maximum_benefit", "תקרת תגמול"),
+    # No money fields: a single derived amount/cap/deductible number lost its
+    # context (which sub-coverage it belongs to) and misled the judge in the
+    # 2026-11 client review; the question-bank answers carry that context.
     ("target_population", "אוכלוסיית יעד"),
 )
 
